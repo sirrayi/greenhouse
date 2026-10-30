@@ -15,14 +15,19 @@ file = "crates/horizon-client-render/src/gfx/translucency.rs"
 name = "greenhouse"
 source = "runtime.rs"
 
-# Translucent quad sorting, off the allocating stable sort.
+# The draw-path scaffold: factors the band arithmetic out of `push`, behaviour
+# identical, and counts the pushes so the per-frame draw volume is observable.
+# `push`'s body has no closures, which is what OVERWRITE requires.
 [[injection]]
-id = "sort-unstable"
+id = "push-band"
 kind = "OVERWRITE"
-target = "horizon_client_render::gfx::translucency::Sorter::sort"
-helper = "sorter.rs"
+target = "horizon_client_render::gfx::page_runs::PageRuns::push"
+helper = "push.rs"
 bindings = [
-  { name = "sorter", ty = "&mut Sorter", value = "&mut *self" },
-  { name = "centers", ty = "&[[f32; 3]]", value = "centers" },
-  { name = "camera", ty = "[f32; 3]", value = "camera" },
+  { name = "runs", ty = "&mut PageRuns", value = "&mut *self" },
+  { name = "distance", ty = "u64", value = "distance" },
+  { name = "page", ty = "u32", value = "page" },
+  { name = "start", ty = "usize", value = "start" },
+  { name = "len", ty = "usize", value = "len" },
+  { name = "tag", ty = "[u32; 3]", value = "tag" },
 ]

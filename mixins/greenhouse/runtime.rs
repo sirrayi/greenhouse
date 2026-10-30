@@ -1,16 +1,16 @@
-//! Greenhouse: renderer performance for Horizon, as a native mixin mod.
-//!
-//! This file is compiled twice:
-//!
-//! * as the standalone `greenhouse` Cargo lib (see `Cargo.toml`), where the
-//!   equivalence tests below run without Horizon, a GPU or game assets;
-//! * as a module injected into Horizon by horizon-mixins (see
-//!   `horizon-mixin.toml`), where the overwritten functions call into it.
-//!
-//! Everything a hook changes has to be provably equivalent to the code it
-//! replaces. The tests at the bottom are that proof: the reference
-//! implementation is a copy of Horizon's own, and the optimized one must
-//! produce a byte-identical index buffer on adversarial inputs.
+// Greenhouse: renderer performance for Horizon, as a native mixin mod.
+//
+// This file is compiled twice:
+//
+// * as the standalone `greenhouse` Cargo lib (see `Cargo.toml`), where the
+//   equivalence tests below run without Horizon, a GPU or game assets;
+// * as a module injected into Horizon by horizon-mixins (see
+//   `horizon-mixin.toml`), where the overwritten functions call into it.
+//
+// Everything a hook changes has to be provably equivalent to the code it
+// replaces. The tests at the bottom are that proof: the reference
+// implementation is a copy of Horizon's own, and the optimized one must
+// produce a byte-identical index buffer on adversarial inputs.
 
 use std::sync::OnceLock;
 
@@ -302,6 +302,31 @@ pub struct Run {
     pub tag: [u32; 3],
 }
 
+/// Horizon's band for a squared distance in bits: `floor(sqrt(d) / 64)`.
+///
+/// Factored out of `push` so the injected body has something real to call, and
+/// so the arithmetic has exactly one home. Bit-identical to the inline form.
+pub fn band_of(distance: u64) -> u64 {
+    (f64::from_bits(distance).sqrt() / BAND) as u64
+}
+
+/// How many runs the draw list has been given, since process start.
+///
+/// The per-frame draw volume is the number the whole analysis turns on, and
+/// nothing in Horizon reports it directly. Cheap enough to leave on: one
+/// relaxed atomic add per section.
+static PUSHES: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+/// Counts one pushed run.
+pub fn count_push() {
+    PUSHES.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+}
+
+/// The count so far.
+pub fn pushes() -> u64 {
+    PUSHES.load(std::sync::atomic::Ordering::Relaxed)
+}
+
 /// Horizon's `PageRuns`, plus the scratch the counting sort reuses so the
 /// steady state allocates nothing.
 #[derive(Default)]
@@ -372,8 +397,19 @@ impl PageRuns {
         pages: &mut [(u32, Option<u32>)],
         base: usize,
     ) {
-        let page = |r: &Run| r.key as u32;
-        if self.runs.windows(2).all(|w| page(&w[0]) == page(&w[1])) {
+        // Already in final order? Then this is an identity, whatever the pages.
+        //
+        // Horizon only short-circuits when every run shares one page, which is
+        // the narrow special case. `push` feeds runs nearest first, so bands are
+        // non-decreasing and key order is (band, page); a run list that is
+        // already key-sorted needs no reordering, and because the runs cover
+        // `draws[base..]` contiguously in order, their `start`s are already the
+        // absolute indices `regroup` would rewrite them to. So the whole call is
+        // a no-op and the copy can be skipped.
+        //
+        // This is strictly more general than the page check at the same O(n),
+        // and it is the common case once sections cluster in a page.
+        if self.runs.windows(2).all(|w| w[0].key <= w[1].key) {
             return;
         }
         if !self.counting_sort_runs() {
@@ -544,6 +580,17 @@ mod regroup_tests {
     }
 
     #[test]
+    fn band_of_is_the_inline_formula() {
+        // The factored band must equal Horizon's inline arithmetic bit for bit,
+        // including at exact band edges and for huge distances.
+        for blocks in [0.0f64, 1.0, 63.9, 64.0, 64.1, 127.9, 128.0, 1023.0, 2048.0, 1.0e6] {
+            let distance = (blocks * blocks).to_bits();
+            let inline = (f64::from_bits(distance).sqrt() / BAND) as u64;
+            assert_eq!(band_of(distance), inline, "{blocks} blocks");
+        }
+    }
+
+    #[test]
     fn matches_horizon_own_unit_cases() {
         let cases: Vec<(Vec<(f64, u32, u32)>, usize)> = vec![
             (
@@ -610,6 +657,43 @@ mod regroup_tests {
         // Past MAX_PAGES the counting sort defers; output must be identical.
         let n = (MAX_PAGES + 8) as u32;
         let runs: Vec<(f64, u32, u32)> = (0..n).map(|i| (i as f64, i, 1)).collect();
+        let (reference, fast) = both(&runs, 0);
+        assert_eq!(reference, fast);
+    }
+
+    #[test]
+    fn already_grouped_lists_are_left_exactly_alone() {
+        // Page order 0,1,0 at increasing distance is NOT one page, so Horizon's
+        // own early-out misses it and it pays for a sort and a full copy. The
+        // keys are already ascending, so the fast path must skip both, and the
+        // result must still equal the reference's.
+        let runs = vec![(1.0, 0u32, 2u32), (90.0, 1, 1), (300.0, 0, 1)];
+        let (mut grouped, draws, pages) = list(&runs);
+        let (before_draws, before_pages) = (draws.clone(), pages.clone());
+        let (mut draws, mut pages) = (draws, pages);
+        grouped.regroup(&mut draws, &mut pages, 0);
+        assert_eq!(draws, before_draws, "draws must be untouched");
+        assert_eq!(pages, before_pages, "pages must be untouched");
+        let (reference, fast) = both(&runs, 0);
+        assert_eq!(reference, fast);
+    }
+
+    #[test]
+    fn matches_when_keys_tie_across_the_early_out() {
+        // Same band and page repeated: `<=` in the early-out must accept ties
+        // without disturbing their order.
+        let (reference, fast) = both(&[(1.0, 2, 1), (2.0, 2, 1), (3.0, 2, 1)], 0);
+        assert_eq!(reference, fast);
+    }
+
+    #[test]
+    fn matches_with_more_than_thirty_two_runs() {
+        // Above the threshold where the sort implementation changes strategy
+        // (insertion sort is used for small slices and is stable regardless),
+        // so ties among many runs are what actually exercises the order.
+        let runs: Vec<(f64, u32, u32)> = (0..40u32)
+            .map(|i| (i as f64 * 64.0, i % 3, 1))
+            .collect();
         let (reference, fast) = both(&runs, 0);
         assert_eq!(reference, fast);
     }

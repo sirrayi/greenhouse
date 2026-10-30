@@ -8,8 +8,9 @@ faster than Java Minecraft with Sodium, and this mod exists to take the next ste
 first one. Greenhouse changes the game's own Rust source at build time through declared mixin
 injections; the launcher builds it on the player's copy. There is no fork and no Java.
 
-**Status: work in progress. One change is proven correct, none is yet proven faster.**
-See [Status](#status) for exactly what is and is not verified.
+**Status: the vehicle is proven on macOS; the optimizations are mostly blocked by a tool
+limitation, and nothing is benchmarked yet.** Read [Capabilities](#mixin-capabilities-measured)
+and [Status](#status) before assuming anything here works.
 
 ---
 
@@ -27,18 +28,15 @@ natively in `horizon-client-render`:
 | CPU BFS occlusion graph | Same graph, built on a worker; frames never wait for it | `gfx/occlusion.rs` |
 | — | **GPU-driven two-phase occlusion culling** (depth-test trick) | `gfx/cull.rs`, `cull.wgsl` |
 | — | **Emulated multi-draw on Metal** via a compute-built index list | `gfx/flat.rs` |
-| — | Far-terrain LOD tiers | `lod.rs` |
 
 Measured by the project on a Ryzen 7 9800X3D + RTX 5080, 1280x720
 (`benchmarks/perf/windows-9800x3d-5080-2026-10-29.md`): at render distance 16, Horizon
 averages **2424 FPS against vanilla+Sodium+Lithium's 1746**, with 1% lows of **709 vs 461**.
 
-So the headroom is not where the mod ecosystem usually looks.
-
 ## Where the time actually goes
 
-From the project's own benchmark report JSON (`benchmarks/perf/*.json`), `cpu_p50_ms` is the
-CPU-side frame work with GPU wait subtracted, and `gpu_p50_ms` is GPU timestamps:
+From the project's own benchmark report JSON, `cpu_p50_ms` is CPU frame work with GPU wait
+subtracted, `gpu_p50_ms` is GPU timestamps:
 
 | RD | scene | p50 frame | CPU | GPU | CPU share of frame |
 | --- | --- | --- | --- | --- | --- |
@@ -47,156 +45,134 @@ CPU-side frame work with GPU wait subtracted, and `gpu_p50_ms` is GPU timestamps
 | 32 | village | 0.82 ms | 0.665 | 0.193 | ~81% |
 | 32 | ocean | 0.73 ms | 0.596 | 0.315 | ~82% |
 
-**The frame is CPU-bound at every render distance.** The GPU is idle roughly half of every
-frame at RD 8. That is why this mod attacks per-frame CPU work — draw-list construction,
-sorting, allocation — and not shaders, culling hardware or vertex format.
+The frame is **CPU-bound at every render distance** — but two caveats that matter:
 
-It also explains the one place Horizon currently loses to vanilla: at RD 32 over an ocean its
-average FPS matches vanilla but its 1% low is 155 FPS against 236 (0.1%: 68 against 99), on an
-idle machine. A median frame of 0.73 ms with 1% lows near 6.5 ms is not a throughput problem,
-it is a **stall** problem, and it is a separate line of work from the CPU-throughput changes
-here.
+- At RD 8 the GPU bound is ~13,300 FPS, so a couple of successful CPU optimizations make the
+  GPU the limiter. The premise is true now and has a short shelf life.
+- The report carries no per-frame CPU/GPU correlation, so it says nothing about whether the
+  *slowest* frames (p999 12.5 ms, max 18.9 ms at RD 32 ocean) are CPU or GPU. The premise is
+  proven for the frames nobody feels and unproven for the frames everybody feels.
+
+## Mixin capabilities (measured)
+
+Probed against the pinned revision with the real `horizon-mixins` CLI, not assumed:
+
+| Question | Answer | Evidence |
+| --- | --- | --- |
+| Does `horizon-mixins` build on macOS? | **Yes** — on its pinned 1.95.0 toolchain | `cargo build --release` succeeded |
+| Does `plan` / `apply` work on macOS? | **Yes**, against a pristine pinned checkout | `status: ok`, 1 injection, 1 module |
+| Does the OVERWRITE transform work? | **Yes** — keeps the signature, emits a local `fn` and a tail call | inspected staged source |
+| Can OVERWRITE replace any function? | **No.** A body containing **closures** is rejected with `E_UNSUPPORTED_CONTROL_FLOW` | `Sorter::sort` and `quad_center` fail; `PageRuns::push` succeeds |
+| Can HEAD inject into a closure-containing body? | **Yes** | `Sorter::sort` HEAD plans cleanly |
+
+This is the single most important constraint on the project. Horizon's renderer is written in
+idiomatic Rust where nearly every hot function contains a closure — `iter().map(..)`,
+`windows(2).all(..)`, `sort_by_key(|v| ..)`, `array::from_fn(..)`. **So OVERWRITE cannot
+rewrite most of the functions this mod wanted to rewrite.** That blocks the translucent-sort
+replacement and the draw-regrouping replacement outright, and it is a tool limitation rather
+than a design choice.
+
+Three staging gotchas, each of which cost a run:
+
+- `/tmp` is a symlink on macOS and the tool refuses paths that traverse symlinks — use
+  `/private/tmp` or a path under `$HOME`.
+- The Horizon tree contains `CLAUDE.md -> AGENTS.md`; staged inputs must not contain symlinks.
+- A support module may not begin with `//!` inner doc comments (they are file attributes);
+  use `//`.
 
 ## The changes
 
 Everything is individually switchable: `HORIZON_GREENHOUSE=off` disables the mod,
-`HORIZON_GREENHOUSE=-sort_unstable` disables one change and keeps the rest.
+`HORIZON_GREENHOUSE=-<name>` disables one change and keeps the rest.
 
-| ID | Change | Location | Output identical? | Speedup |
+| ID | Change | Expressible as a mixin? | Output identical? | Speedup |
 | --- | --- | --- | --- | --- |
-| `sort_unstable` | Translucent quad sort: unstable sort with an explicit index tie-break instead of a stable sort that allocates a scratch buffer on every call | `gfx/translucency.rs` `Sorter::sort` | **Proven** (below) | Unmeasured |
-| `regroup_counting` | Draw regrouping: counting sort over the bounded `(band, page)` key instead of `sort_by_key` + a double scratch copy | `gfx/page_runs.rs` `PageRuns::regroup` | Designed | Unmeasured |
-| `band_no_sqrt` | Distance band from a threshold compare instead of an `f64` square root per section per frame | `gfx/page_runs.rs` `PageRuns::push` | Designed | Unmeasured |
-| `cull_scratch` | Occlusion readback: reuse a scratch buffer instead of allocating a `Vec` per readback | `gfx/cull.rs` `begin` | Designed | Unmeasured |
+| `push-band` | Factors the band arithmetic out of `PageRuns::push` and counts pushed runs, so the draw volume becomes observable | **Yes** (closure-free body) | **Yes**, and tested | None by design — a scaffold |
+| `regroup_counting` | Stable counting sort over the `(band, page)` key instead of `sort_by_key` + a double scratch copy | **No** — `regroup`'s body contains closures | **Yes**, proven by 12 equivalence tests | Unmeasured |
+| `regroup_early_out` | Skip regrouping when the run list is already key-sorted, not only when every run shares one page | **No** — same function | **Yes**, proven | Unmeasured |
+| `sort_unstable` | Translucent sort without a stable sort's allocation | **No** — `sort_by` body contains closures | **Yes**, proven by 5 equivalence tests | ~none (see below) |
 
-### `sort_unstable`, and why it is exactly equivalent
+The three blocked changes are not wasted: their algorithms are implemented in
+`mixins/greenhouse/runtime.rs` with a reference copy of Horizon's own code beside them, and
+`cargo test` proves the replacements produce byte-identical output. When the tool gains closure
+support, or if the changes are upstreamed, the bodies already exist and are already proven.
 
-Horizon sorts each translucent section's quads farthest-first, and preserves mesh order for
-quads at equal distance by using a **stable** sort. Rust's stable `sort_by` allocates an
-`n / 2` scratch buffer on every call — and this runs once per resorted section, per frame.
+### What the correctness proofs cover
 
-Adding the quad index as an explicit tie-break makes the comparator a total order over
-distinct elements, so the unstable sort has exactly one admissible result and it is the stable
-one. Same index buffer, no allocation.
+`regroup_counting` (12 tests): Horizon's own unit cases including the non-zero-`base` offset
+list, 500 randomised frames, the single-page early-out, the new monotonicity early-out, both
+fallback paths, zero-length runs, and >32 runs. The fast path refuses any input outside the
+shape `push` guarantees and defers to the reference, so a future upstream change degrades to
+the old behaviour rather than to wrong behaviour.
 
-`mixins/greenhouse/runtime.rs` carries a reference copy of Horizon's implementation and its
-replacement, and `cargo test` proves they agree on:
+`sort_unstable` (5 tests): Horizon's pinned cases, up to 257 quads at identical distance, 400
+randomised sections with quarter-block coordinates so ties are frequent, and `±0.0`/`NaN`/
+infinities. Horizon's own tests for this function use at most 3 elements and therefore **do
+not** pin the tie-break behaviour — an unstable sort without a tie-break would pass them all,
+because insertion sort is used below ~20 elements and is stable regardless.
 
-- the three cases Horizon's own translucency unit tests pin;
-- up to 257 identical quads, where ties alone decide the order;
-- 400 randomized sections with quarter-block coordinates, so ties are frequent;
-- `+0.0`/`-0.0`, `NaN` and infinities, where `total_cmp`'s total order matters.
+### Two corrections to earlier claims in this project
 
-```
-running 5 tests
-test tests::identical_on_the_existing_unit_cases ... ok
-test tests::identical_under_massive_distance_ties ... ok
-test tests::identical_on_random_sections_with_frequent_ties ... ok
-test tests::identical_on_degenerate_inputs ... ok
-test tests::every_switch_can_be_turned_off_by_name ... ok
-```
-
-Correctness is not the open question for this change. Whether it is *worth* anything is: at
-RD 8 a frame is 0.26 ms and the change may be lost in noise.
+- **`sort_unstable` is not a performance win.** `SortState::update` early-outs unless the
+  section-relative point of view changed, so sorts fire on viewpoint change, not per frame. It
+  is kept only as correctness hardening. Anyone reading the earlier version of this README
+  should discard its framing of this change as a speedup.
+- **Caching per-section draw records across frames is worthless**, and not for the reason
+  first given. The record embeds the visible-list index, which moves every frame — but even
+  indexing by a stable slot would not pay, because `regroup` has to re-copy every draw into
+  `(band, page)` order regardless, and `origins` is camera-relative and rewritten every frame.
+  The copies dominate, not the index.
 
 ## Status
 
 | Item | State |
 | --- | --- |
 | Horizon beats vanilla + Sodium + Lithium | **Confirmed** from the project's published benchmark |
-| The frame is CPU-bound | **Confirmed** from the project's benchmark report JSON |
-| `sort_unstable` produces identical output | **Proven** — 5 equivalence tests, `cargo test` |
-| `sort_unstable` is faster | **Unmeasured** — see the caveat below |
-| The other three changes | **Designed, not written** |
-| This bundle plans/applies/compiles under horizon-mixins | **Unverified** |
-| End-to-end FPS A/B against pristine Horizon | **Not started** |
+| The frame is CPU-bound | **Confirmed** for the median; unproven for the tail |
+| `horizon-mixins` runs on macOS | **Confirmed** (`plan` + `apply`, `status: ok`) |
+| OVERWRITE cannot rewrite closure-bearing bodies | **Confirmed** by probe |
+| `regroup_counting` / `sort_unstable` equivalent | **Proven** by `cargo test` |
+| Either of them shipped as a working hook | **Blocked** by the OVERWRITE limitation |
+| The patched game compiles (`check`) | **In progress** |
+| Any FPS measurement | **Not started** |
 
-**Nothing here has been benchmarked yet, on purpose.** Every measurement so far was taken with
-the machine at load 27 on 8 cores, and under that load a microbenchmark of the sort swung
-between −55% and +148% on identical inputs run to run. Numbers like that are worse than no
-numbers. The switch to unstable sorting is a safe change with a small expected win; it is not
-yet a demonstrated one.
+**Nothing here has been benchmarked.** Every measurement attempted was taken with the machine
+at load 23–27 on 8 cores; a microbenchmark swung between −55% and +148% on identical inputs
+run to run. Those numbers are worse than no numbers.
 
-## Verifying it
+## Where to measure, and what to instrument first
 
-The mod is pinned to the tagged Nightly `nightly-source/2026-10-30-ba6344a`
-(`ba6344a59cb9e755b730dcf02285fc0d33b97d3c`). The three functions this mod targets are
-byte-identical between that Nightly and later `main`, so the analysis carries across revisions
-even though `gfx.rs` elsewhere has moved.
+Both review passes converged on the same conclusion, and it is not "write a faster sort":
 
-```sh
-# 1. The equivalence proof, with no Horizon, GPU or assets involved.
-cargo test --release
-
-# 2. Is the change even worth having? Run only on an idle machine, several times.
-cargo test --release -- --ignored --nocapture
-
-# 3. Does it plan, apply and compile against the pinned Horizon?
-#    See tools/verify.sh, which drives horizon-mixins plan/apply/check
-#    against a pristine export of the pinned revision.
-tools/verify.sh
-
-# 4. Does it make the game faster, and not slower anywhere?
-#    Pristine and modded builds, same machine, same world, same camera path:
-#    horizon-client --benchmark standard --offscreen, then compare the reports.
-```
-
-Step 3 is the immediate blocker: horizon-mixins' own tooling is validated on Linux, and this
-work is currently happening on macOS, where the staging tools use `fcntl` locks and Python
-3.12+. Until it runs, the manifest is a design, not a working mod.
+1. **RD 8 is a write-off.** Horizon's RD 8 runs have a ±7.9% confidence interval (3 repeats)
+   against a ≤5% expected effect, and 3495 FPS is 29x a 120 Hz panel. Nothing at RD 8 is
+   measurable or perceptible. **RD 32 village** (CI ±0.8%, CPU 81% of frame) is the target.
+2. **The draw-list region has no span.** The draw-record build, all the `regroup` calls and the
+   translucency resort are the one uninstrumented block in the frame, which is why every cost
+   figure about them is an estimate.
+3. **There is a trap:** `spans::describe` filters spans below **0.5 ms**, so a `visibility`
+   span worth 0.2–0.35 ms never prints. A measurement build has to lower that filter.
+4. **The tail is the only perceptible defect.** RD 32 ocean p50 0.73 ms against p999 12.5 ms
+   and max 18.9 ms is a bimodal stall signature. The two structural candidates, neither in the
+   original plan: mass translucency resort when the camera crosses a 16-block boundary (every
+   translucent section resorts in one frame, recurring every 16 blocks), and
+   `streaming.update` draining worker results on the main thread every frame.
+5. **Also relevant:** the far-terrain LOD subsystem is dormant in benchmark runs
+   (`lod_distance` defaults to 0 and the driver leaves Horizon's settings at defaults), so an
+   earlier hypothesis that blamed LOD geometry on the ocean 1% low was describing a scene the
+   benchmark never built.
 
 ## Rules this mod follows
 
-- **Identical output over speed.** A change that alters what is on screen is not a performance
-  change, it is a parity bug. `sort_unstable` is the model: provable equivalence, then measure.
+- **Identical output over speed.** A change that alters what is on screen is a parity bug, not
+  a performance change. Every shipped change must carry a proof, not an argument.
 - **Never trade memory for frame time on weak devices.** No change here may increase resident
-  memory or VRAM. Every one of them removes per-frame allocation; that helps an 8 GB machine.
-- **No silent regressions.** Each change is separately switchable, so a device that regresses
-  can be narrowed to one switch instead of losing the whole mod.
-- **Optimize what is actually binding.** CPU work here, not GPU work, because that is what the
-  measurements say.
+  memory or VRAM. The shipped scaffold adds one relaxed atomic; the blocked ones remove
+  per-frame allocation.
+- **No silent regressions.** Each change is separately switchable.
 
 ## Attribution
 
 Horizon is MIT, by the horizon-rust contributors. horizon-mixins is MIT, by levzzz5154.
-Greenhouse is MIT. It contains no Horizon source beyond the reference implementation copied
-into `runtime.rs` and the hook bodies it declares, both marked as such.
-
----
-
-## What the stall audit found (and what it refuted)
-
-The RD 32 ocean 1% low was first assumed to come from far-terrain LOD geometry. **That was
-wrong.** `lod_distance` defaults to 0 (`graphics.rs`) and the benchmark driver leaves Horizon's
-own settings at their defaults (`docs/benchmark.md`), so the LOD subsystem is never constructed
-during a benchmark run. Any hypothesis starting from "lots of far LOD geometry" is describing a
-scene the benchmark never built.
-
-What the numbers do say: the ocean flight's median frame is 0.73 ms while its slowest frames
-reach 18.9 ms, and there are only ~84 frames above 4.17 ms in ~14,300. A 15 ms frame is 25× the
-whole median frame's CPU work, so the tail cannot be "a bit more of the usual per-frame loop".
-It must be a rare large event on the frame thread, or a **wait**.
-
-Three properties of the client make those the live suspects:
-
-1. **The diagnostic hides the wait.** `draw_frame` measures `last_wait` (surface acquire +
-   present) and the logged `cpu` subtracts it, while the benchmark's frame interval records it
-   in full. A frame blocked 15 ms in acquire prints nothing under `HORIZON_SPIKES`.
-   *Unhiding `last_wait` is the first diagnostic, before any optimization.*
-2. **The terrain arena grows monotonically mid-frame.** Only `pages.last()` may grow, doubling
-   toward a 268 MB page, and each growth is a synchronous buffer creation plus a copy of the
-   entire previous page recorded into the current frame's encoder. Combined with first-fit over
-   a `BTreeMap`, holes in older pages are never reusable for large requests, so the arena keeps
-   climbing instead of reaching steady state. Ocean reports the highest GPU total of the four
-   scenes (2085 MB).
-3. **Uploads are unbudgeted by default.** `chunk_updates = 0` and `upload_budget_kib = 0` mean
-   every mesh the workers finish is uploaded in the frame it finishes.
-
-A separate, scene-independent suspect worth a cheap A/B: fancy clouds rebuild in one 4–8 MB
-staging write roughly every 12 blocks of travel, and the prediction is that it costs the same in
-all four scenes — which is falsifiable with `renderClouds:"fast"`.
-
-**Consequence for this mod:** the sort and draw-list changes below are real but small, and they
-are throughput improvements. The 1% lows are a *stall* problem with a different fix list, and it
-starts with instrumentation rather than with a patch. Naming them the same project would hide
-that.
+Greenhouse is MIT. The reference implementations copied into `runtime.rs` are Horizon's own
+code, marked as such.

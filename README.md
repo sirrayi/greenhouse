@@ -64,8 +64,11 @@ Probed against the pinned revision with the real `horizon-mixins` CLI, not assum
 | Does the OVERWRITE transform work? | **Yes** — keeps the signature, emits a local `fn` and a tail call | inspected staged source |
 | Can OVERWRITE replace any function? | **No.** A body containing **closures** is rejected with `E_UNSUPPORTED_CONTROL_FLOW` | `Sorter::sort` and `quad_center` fail; `PageRuns::push` succeeds |
 | Can HEAD inject into a closure-containing body? | **Yes** | `Sorter::sort` HEAD plans cleanly |
+| Can a cancelling HEAD substitute a whole function? | **Only if it returns an owned value.** Helpers may not declare lifetimes, so a borrowed return cannot be written | `quad_center` ok; `Sorter::sort` gives `E_INVALID_HELPER` |
+| Can a call-level hook target code inside a closure-bearing body? | **No** | `BEFORE_CALL` on `self.runs.sort_by_key` gives `E_UNSUPPORTED_CONTROL_FLOW` |
 
-This is the single most important constraint on the project. Horizon's renderer is written in
+Six probes, in full: [docs/capabilities.md](docs/capabilities.md). This is the single most
+important constraint on the project. Horizon's renderer is written in
 idiomatic Rust where nearly every hot function contains a closure — `iter().map(..)`,
 `windows(2).all(..)`, `sort_by_key(|v| ..)`, `array::from_fn(..)`. **So OVERWRITE cannot
 rewrite most of the functions this mod wanted to rewrite.** That blocks the translucent-sort

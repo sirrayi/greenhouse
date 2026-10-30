@@ -1,0 +1,14 @@
+[package]
+name = "greenhouse"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.95"
+license = "MIT"
+description = "Renderer performance for Horizon, as a native horizon-mixins mod"
+
+[lib]
+# This exact source is also injected into Horizon as a module by horizon-mixins,
+# so the equivalence tests here run against the code the game actually calls.
+path = "mixins/greenhouse/runtime.rs"
+
+[workspace]

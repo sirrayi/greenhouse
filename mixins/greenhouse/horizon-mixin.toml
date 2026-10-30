@@ -1,0 +1,28 @@
+[mod]
+id = "greenhouse"
+version = "0.1.0"
+priority = 100
+
+[compatibility]
+# The tagged Nightly this bundle is pinned to (nightly-source/2026-10-30-ba6344a).
+horizon_revision = "ba6344a59cb9e755b730dcf02285fc0d33b97d3c"
+
+# The support module: compiled inside Horizon, and the same file is the
+# standalone testable crate (see Cargo.toml).
+[[module]]
+id = "greenhouse"
+file = "crates/horizon-client-render/src/gfx/translucency.rs"
+name = "greenhouse"
+source = "runtime.rs"
+
+# Translucent quad sorting, off the allocating stable sort.
+[[injection]]
+id = "sort-unstable"
+kind = "OVERWRITE"
+target = "horizon_client_render::gfx::translucency::Sorter::sort"
+helper = "sorter.rs"
+bindings = [
+  { name = "sorter", ty = "&mut Sorter", value = "&mut *self" },
+  { name = "centers", ty = "&[[f32; 3]]", value = "centers" },
+  { name = "camera", ty = "[f32; 3]", value = "camera" },
+]

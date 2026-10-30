@@ -1,0 +1,13 @@
+{
+  "horizon_repository": "https://github.com/horizon-rust/horizon",
+  "horizon_revision": "ba6344a59cb9e755b730dcf02285fc0d33b97d3c",
+  "horizon_nightly_tag": "nightly-source/2026-10-30-ba6344a",
+  "horizon_mixins_repository": "https://github.com/horizon-rust/horizon-mixins",
+  "horizon_mixins_revision": "d9c83d7096b7ea5b83678da2efdfd6161f74997e",
+  "mixin_schema": 6,
+  "targets_unchanged_since_revision": [
+    "crates/horizon-client-render/src/gfx/translucency.rs",
+    "crates/horizon-client-render/src/gfx/page_runs.rs",
+    "crates/horizon-client-render/src/gfx/cull.rs"
+  ]
+}

@@ -11,7 +11,7 @@ horizon_revision = "ba6344a59cb9e755b730dcf02285fc0d33b97d3c"
 # standalone testable crate (see Cargo.toml).
 [[module]]
 id = "greenhouse"
-file = "crates/horizon-client-render/src/gfx/translucency.rs"
+file = "crates/horizon-client-render/src/gfx/page_runs.rs"
 name = "greenhouse"
 source = "runtime.rs"
 

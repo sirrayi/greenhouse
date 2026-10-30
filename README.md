@@ -161,3 +161,42 @@ work is currently happening on macOS, where the staging tools use `fcntl` locks 
 Horizon is MIT, by the horizon-rust contributors. horizon-mixins is MIT, by levzzz5154.
 Greenhouse is MIT. It contains no Horizon source beyond the reference implementation copied
 into `runtime.rs` and the hook bodies it declares, both marked as such.
+
+---
+
+## What the stall audit found (and what it refuted)
+
+The RD 32 ocean 1% low was first assumed to come from far-terrain LOD geometry. **That was
+wrong.** `lod_distance` defaults to 0 (`graphics.rs`) and the benchmark driver leaves Horizon's
+own settings at their defaults (`docs/benchmark.md`), so the LOD subsystem is never constructed
+during a benchmark run. Any hypothesis starting from "lots of far LOD geometry" is describing a
+scene the benchmark never built.
+
+What the numbers do say: the ocean flight's median frame is 0.73 ms while its slowest frames
+reach 18.9 ms, and there are only ~84 frames above 4.17 ms in ~14,300. A 15 ms frame is 25× the
+whole median frame's CPU work, so the tail cannot be "a bit more of the usual per-frame loop".
+It must be a rare large event on the frame thread, or a **wait**.
+
+Three properties of the client make those the live suspects:
+
+1. **The diagnostic hides the wait.** `draw_frame` measures `last_wait` (surface acquire +
+   present) and the logged `cpu` subtracts it, while the benchmark's frame interval records it
+   in full. A frame blocked 15 ms in acquire prints nothing under `HORIZON_SPIKES`.
+   *Unhiding `last_wait` is the first diagnostic, before any optimization.*
+2. **The terrain arena grows monotonically mid-frame.** Only `pages.last()` may grow, doubling
+   toward a 268 MB page, and each growth is a synchronous buffer creation plus a copy of the
+   entire previous page recorded into the current frame's encoder. Combined with first-fit over
+   a `BTreeMap`, holes in older pages are never reusable for large requests, so the arena keeps
+   climbing instead of reaching steady state. Ocean reports the highest GPU total of the four
+   scenes (2085 MB).
+3. **Uploads are unbudgeted by default.** `chunk_updates = 0` and `upload_budget_kib = 0` mean
+   every mesh the workers finish is uploaded in the frame it finishes.
+
+A separate, scene-independent suspect worth a cheap A/B: fancy clouds rebuild in one 4–8 MB
+staging write roughly every 12 blocks of travel, and the prediction is that it costs the same in
+all four scenes — which is falsifiable with `renderClouds:"fast"`.
+
+**Consequence for this mod:** the sort and draw-list changes below are real but small, and they
+are throughput improvements. The 1% lows are a *stall* problem with a different fix list, and it
+starts with instrumentation rather than with a patch. Naming them the same project would hide
+that.

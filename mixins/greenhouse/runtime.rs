@@ -20,12 +20,14 @@ use std::sync::OnceLock;
 /// particular device can turn off exactly the change that caused it, without
 /// losing the others.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[allow(dead_code)]
 pub enum Feature {
     /// Sort translucent quads with an unstable sort plus an explicit index
     /// tie-break, instead of a stable sort that allocates.
     SortUnstable,
 }
 
+#[allow(dead_code)]
 impl Feature {
     /// The name used in the environment variable.
     pub fn key(self) -> &'static str {
@@ -43,6 +45,7 @@ impl Feature {
 ///
 /// `HORIZON_GREENHOUSE=off` disables the whole mod; `HORIZON_GREENHOUSE=-sort_unstable`
 /// disables one change and keeps the rest. Unset keeps every change on.
+#[allow(dead_code)]
 fn disabled() -> &'static [&'static str] {
     static DISABLED: OnceLock<Vec<&'static str>> = OnceLock::new();
     DISABLED.get_or_init(|| {
@@ -68,6 +71,7 @@ fn disabled() -> &'static [&'static str] {
 }
 
 /// Whether `feature` should run. Cheap: the environment is read once.
+#[allow(dead_code)]
 pub fn on(feature: Feature) -> bool {
     !disabled().contains(&feature.key())
 }
@@ -86,6 +90,7 @@ pub fn on(feature: Feature) -> bool {
 /// explicit tie-break makes the comparator a total order over distinct
 /// elements, so the unstable sort has exactly one admissible result and it is
 /// the stable one. Identical output, no allocation.
+#[allow(dead_code)]
 pub fn sort_quads(
     order: &mut Vec<(u32, f32)>,
     indices: &mut Vec<u32>,
@@ -130,6 +135,7 @@ pub const BAND: f64 = 64.0;
 
 /// One section's draws: `start..start + len` of the list (Horizon's `Run`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+#[allow(dead_code)]
 pub struct Run {
     /// `band << 32 | page`.
     pub key: u64,
@@ -159,6 +165,7 @@ pub fn count_push() {
 }
 
 /// The count so far.
+#[allow(dead_code)]
 pub fn pushes() -> u64 {
     PUSHES.load(std::sync::atomic::Ordering::Relaxed)
 }
@@ -166,6 +173,7 @@ pub fn pushes() -> u64 {
 /// Horizon's `PageRuns`, plus the scratch the counting sort reuses so the
 /// steady state allocates nothing.
 #[derive(Default)]
+#[allow(dead_code)]
 pub struct PageRuns {
     pub runs: Vec<Run>,
     scratch: Vec<([u32; 5], (u32, Option<u32>))>,
@@ -180,9 +188,12 @@ pub struct PageRuns {
 /// Above this many distinct pages, or distinct (band, page) keys, the counting
 /// sort stops being obviously cheaper and the reference is used instead. Both
 /// are correct; this only decides which runs.
+#[allow(dead_code)]
 pub const MAX_PAGES: usize = 64;
+#[allow(dead_code)]
 pub const MAX_KEYS: usize = 4096;
 
+#[allow(dead_code)]
 impl PageRuns {
     pub fn clear(&mut self) {
         self.runs.clear();

@@ -136,12 +136,33 @@ because insertion sort is used below ~20 elements and is stable regardless.
 | OVERWRITE cannot rewrite closure-bearing bodies | **Confirmed** by probe |
 | `regroup_counting` / `sort_unstable` equivalent | **Proven** by `cargo test` |
 | Either of them shipped as a working hook | **Blocked** by the OVERWRITE limitation |
-| The patched game compiles (`check`) | **In progress** |
+| The patched game compiles and passes its tests | **Confirmed** — see below |
 | Any FPS measurement | **Not started** |
 
 **Nothing here has been benchmarked.** Every measurement attempted was taken with the machine
 at load 23–27 on 8 cores; a microbenchmark swung between −55% and +148% on identical inputs
 run to run. Those numbers are worse than no numbers.
+
+## Verified end to end
+
+`horizon-mixins check` stages a pristine export of the pinned revision, injects greenhouse, and
+runs the game's own tests against the patched tree:
+
+```
+status: ok    injections: 1    modules: 1
+cargo 451 s   test run 43.5 s
+test result: ok. 576 passed; 0 failed; 16 ignored
+```
+
+So on macOS the whole vehicle works — export, plan, apply, inject, compile — and the result is
+behaviour-preserving by Horizon's own measure: every one of the 576 tests in
+`horizon-client-render`, including `gfx::arena`, `gfx::cull`, `gfx::occlusion`, `mesher::sides`,
+`streaming`, and the visibility suites, passes with the mod compiled in. The injected module
+compiles clean with no warnings.
+
+That is the strongest statement available before a frame is measured: the mod does not change
+what the renderer does. Whether it can change how fast it does it is still open, and blocked on
+a quiet machine for the A/B.
 
 ## Where to measure, and what to instrument first
 

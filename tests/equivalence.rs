@@ -4,7 +4,6 @@
 // same source is injected into Horizon as a support module, and nothing
 // test-only may reach the game.
 
-use greenhouse::*;
 
 pub fn sort_reference(
     order: &mut Vec<(u32, f32)>,

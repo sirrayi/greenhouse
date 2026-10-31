@@ -156,6 +156,27 @@ because insertion sort is used below ~20 elements and is stable regardless.
 at load 23–27 on 8 cores; a microbenchmark swung between −55% and +148% on identical inputs
 run to run. Those numbers are worse than no numbers.
 
+## Installing it
+
+The launcher installs a native mod from a source-only `.hnmod` archive:
+
+```sh
+python3 tools/package.py     # writes target/greenhouse-0.1.0.hnmod, deterministic
+```
+
+Drop that file into your instance's `horizon-native-mods/` folder (beside `options.txt`), or
+install it from the Mods page, then **Build**. Each release ships the archive, and the launcher
+checks it the way the registry does — Rust and TOML under `mixins/<id>/`, nothing run.
+
+**Be clear about what that installs.** It is the scaffold, not the performance work. The patches
+that actually remove CPU work cannot be shipped as a mod, because `horizon-mixins` cannot rewrite
+a function whose body contains a closure nor substitute one returning borrowed data
+([docs/capabilities.md](docs/capabilities.md)). Installing also triggers a custom build of Horizon
+at the pinned commit: a Rust toolchain download and roughly twelve minutes.
+
+The same sources always produce the same archive: SHA-256
+`07e9ebce49f5d55f2fa9c9d27b03f7f52afb3b8c4e3ead9fec650d62cc3bd9ed` for v0.1.0.
+
 ## Two delivery paths, and why there have to be two
 
 `horizon-mixins` cannot express the changes that matter here (see

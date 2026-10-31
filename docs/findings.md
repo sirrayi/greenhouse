@@ -239,6 +239,42 @@ A useful consequence for anyone repeating this: the `cpu_p50_ms` and `gpu_p50_ms
 report tell you which regime you are in before you spend an hour of runs. If GPU p50 exceeds CPU
 p50, a CPU change cannot move your frame rate, and no amount of repeats will make it.
 
+## The frame-level A/B, completed: not significant, and a lesson about stopping early
+
+Eight interleaved pairs at RD 32 village, offscreen, Apple M1, paired analysis. One pair was
+dropped by a rule fixed in advance (a run whose `cpu_p50` exceeded 3x its own arm's median is not
+measuring this patch), leaving seven:
+
+| metric | pristine | patched | paired diff | t (df=6) | patched lower in |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| `cpu_p50_ms` | 2.574 | 2.535 | −0.039 ms (−1.5%) | −0.65 | 6 / 7 |
+| `gpu_p50_ms` | 4.355 | 4.405 | +0.049 ms | +0.69 | 2 / 7 |
+| `avg_fps` | 204.9 | 205.0 | +0.2 FPS | +0.06 | 2 / 7 |
+| `low_1pct_fps` | 144.5 | 139.7 | −4.8 FPS | −1.22 | 5 / 7 |
+| `p50_ms` | 4.865 | 4.855 | −0.010 ms | −0.14 | 5 / 7 |
+
+Significance at df=6 is |t| > 2.447. **Nothing is significant, including the 1% lows.** The
+direction on CPU time is consistent — 6 of 7 pairs lower — but small, and the measurement cannot
+resolve it.
+
+### The part worth remembering
+
+The **first four pairs of this run** gave `cpu_p50` of 2.570 → 2.445 ms, a 4.9% drop, with
+**t = −6.02 and all four pairs favouring the patch**. That is a clean, publishable-looking result,
+and it was noise. Three more pairs pulled it to −1.5% and t = −0.65.
+
+Had the run stopped at four pairs — as the previous run did, at five — the repository would now
+contain a significant-looking claim that is not true. The only defence is a stopping rule fixed
+before the data arrives, not after: collect the planned number, then look. A result that appears
+mid-collection and disappears by the end is exactly what a false positive looks like on the way in.
+
+### What this leaves
+
+The patch makes the visibility walk **19.6% faster** — that is measured with separated arms and
+reproduces. Its effect on a whole frame at this scene, on this machine, is **below the resolution
+of the measurement**. Both statements are true and only the first supports a claim that it makes
+Horizon faster for a player.
+
 ## The measurement that changed a decision
 
 Function-level microbenchmarks were run under load using the minimum over 200 samples, since a

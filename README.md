@@ -68,7 +68,8 @@ Probed against the pinned revision with the real `horizon-mixins` CLI, not assum
 | Can a call-level hook target code inside a closure-bearing body? | **No** | `BEFORE_CALL` on `self.runs.sort_by_key` gives `E_UNSUPPORTED_CONTROL_FLOW` |
 
 Six probes, in full: [docs/capabilities.md](docs/capabilities.md). This is the single most
-important constraint on the project. Horizon's renderer is written in
+important constraint on the project. The full analysis, including the hypotheses that were
+refuted along the way, is in [docs/findings.md](docs/findings.md). Horizon's renderer is written in
 idiomatic Rust where nearly every hot function contains a closure — `iter().map(..)`,
 `windows(2).all(..)`, `sort_by_key(|v| ..)`, `array::from_fn(..)`. **So OVERWRITE cannot
 rewrite most of the functions this mod wanted to rewrite.** That blocks the translucent-sort

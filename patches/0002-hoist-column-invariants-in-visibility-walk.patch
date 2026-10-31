@@ -1,0 +1,105 @@
+diff --git a/crates/horizon-client-render/src/gfx/resident.rs b/crates/horizon-client-render/src/gfx/resident.rs
+index eb5727caa..b4a57d2ef 100644
+--- a/crates/horizon-client-render/src/gfx/resident.rs
++++ b/crates/horizon-client-render/src/gfx/resident.rs
+@@ -181,6 +181,11 @@ fn in_view(key: SectionKey, camera: DVec3, radius: i32, frustum: &Frustum) -> Op
+ 
+ /// `in_view` without the distance test; `inside`: the section's column is
+ /// entirely inside the frustum, so the section is too.
++///
++/// `Resident::visible` no longer calls this: it hoists the column-invariant
++/// part of the same arithmetic. Kept, and used by the tests, as the reference
++/// the hoisted version must match bit for bit.
++#[cfg(test)]
+ fn in_frustum(
+     key: SectionKey,
+     min_y: i32,
+@@ -219,31 +224,78 @@ impl<T> Resident<T> {
+         out: &mut Vec<Visible>,
+     ) {
+         let from = camera_column(camera);
++        // Two of every section's three camera-relative components are its
++        // column's, and the column already computed them. Hoisting them leaves
++        // each section only its y term in the frustum test and in the squared
++        // distance, in the operation order `Frustum::intersects` and
++        // `Vec3::dot` use -- the same products, added in the same association,
++        // so the culling decision and the sort key come out bit-identical.
++        let planes = frustum.planes;
++        // Per plane, the 16 a positive axis adds to its far corner, or 0 for a
++        // negative one. Constant for the whole walk.
++        let mut x_at = [0.0f32; 6];
++        let mut z_at = [0.0f32; 6];
++        for (i, p) in planes.iter().enumerate() {
++            x_at[i] = if p.x >= 0.0 { 16.0 } else { 0.0 };
++            z_at[i] = if p.z >= 0.0 { 16.0 } else { 0.0 };
++        }
++        let mut px_vx = [0.0f32; 6];
++        let mut pz_vz = [0.0f32; 6];
+         for column in &self.columns {
+             let near = in_view_distance(from, radius, column.x, column.z);
+             if !near && !beyond(column.x, column.z) {
+                 continue;
+             }
+-            let min = origin((column.x, column.low, column.z), self.min_y, camera).as_vec3();
+-            let top = origin((column.x, column.high, column.z), self.min_y, camera).as_vec3();
+-            let max = top + Vec3::splat(16.0);
++            // `origin` computes each component on its own, so a column's
++            // sections share its x and z exactly; only y is per section.
++            let dx = f64::from(column.x * 16) - camera.x;
++            let dz = f64::from(column.z * 16) - camera.z;
++            let (ox, oz) = (dx as f32, dz as f32);
++            let low = (f64::from(self.min_y + column.low * 16) - camera.y) as f32;
++            let high = (f64::from(self.min_y + column.high * 16) - camera.y) as f32;
++            let min = Vec3::new(ox, low, oz);
++            let max = Vec3::new(ox, high, oz) + Vec3::splat(16.0);
+             let inside = frustum.contains(min, max);
+             if !inside && !frustum.intersects(min, max) {
+                 continue;
+             }
++            for (i, p) in planes.iter().enumerate() {
++                px_vx[i] = p.x * (ox + x_at[i]);
++                pz_vz[i] = p.z * (oz + z_at[i]);
++            }
++            // The camera-relative +8 of the column, and its squares: the
++            // distance is ((x8*x8 + y8*y8) + z8*z8), so x and z hoist.
++            let x8 = dx + 8.0;
++            let z8 = dz + 8.0;
++            let (xx, zz) = (x8 * x8, z8 * z8);
+             for &(y, slot) in &column.sections {
+                 let key = (column.x, y, column.z);
+                 if near && !reachable(key) {
+                     continue;
+                 }
+-                if let Some((d, o)) = in_frustum(key, self.min_y, camera, frustum, inside) {
+-                    out.push(Visible {
+-                        distance: d.to_bits(),
+-                        key,
+-                        slot,
+-                        origin: o.to_array(),
+-                    });
++                let dy = f64::from(self.min_y + y * 16) - camera.y;
++                let oy = dy as f32;
++                if !inside {
++                    let hi = oy + 16.0;
++                    let mut seen = true;
++                    for (i, p) in planes.iter().enumerate() {
++                        let vy = if p.y >= 0.0 { hi } else { oy };
++                        if ((px_vx[i] + p.y * vy) + pz_vz[i]) + p.w < 0.0 {
++                            seen = false;
++                            break;
++                        }
++                    }
++                    if !seen {
++                        continue;
++                    }
+                 }
++                let y8 = dy + 8.0;
++                out.push(Visible {
++                    distance: ((xx + y8 * y8) + zz).to_bits(),
++                    key,
++                    slot,
++                    origin: [ox, oy, oz],
++                });
+             }
+         }
+         out.sort_unstable_by_key(|v| (v.distance, v.key));

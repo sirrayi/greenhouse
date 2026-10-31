@@ -139,6 +139,8 @@ because insertion sort is used below ~20 elements and is stable regardless.
 | The patched game compiles and passes its tests | **Confirmed** — see below |
 | `patches/0001` applies to the pinned revision | **Confirmed** — `tools/apply-patches.sh --check` |
 | `patches/0001` passes Horizon's 576 tests | **Confirmed** — `576 passed; 0 failed` |
+| `patches/0002` is bit-identical to the reference walk | **Confirmed** — Horizon's exact-bits oracle test passes |
+| Both patches together pass all 576 tests | **Confirmed** — `576 passed; 0 failed` |
 | Any FPS measurement | **Not started** |
 
 **Nothing here has been benchmarked.** Every measurement attempted was taken with the machine
@@ -181,6 +183,27 @@ same O(n) and is the common case once sections cluster in a page.
 Verified: 12 equivalence tests against a reference copy of Horizon's own code, plus **Horizon's
 full 576-test render suite passing with the patch applied**
 (`test result: ok. 576 passed; 0 failed; 16 ignored`).
+
+### `patches/0002-hoist-column-invariants-in-visibility-walk.patch`
+
+`Resident::visible` walks every resident column and every section in it, and two of every
+section's three camera-relative components are its column's — computed at the column and then
+thrown away, to be recomputed per section by `origin()`. Across a render-distance-32 frame that
+is roughly 26,000 calls to `origin()` a frame, about 317,000 scalar operations, of which two
+thirds are redundant.
+
+The patch hoists each column's `x` and `z` origin, the per-plane products they feed (which also
+depend only on the plane's sign), and the column's share of the squared distance. What is left
+per section is its `y` term, added in exactly the association `Frustum::intersects` and
+`Vec3::dot` use. Same products, same order, so the culling decision and the sort key are
+**bit-identical** — not "visually the same".
+
+Verified against Horizon's own oracle: `column_walk_finds_exactly_the_sections_in_view` compares
+the walk against a per-section reference and asserts equal f64 distance bits, equal f32 origin,
+equal key and equal order across several cameras, radii and holed columns. It passes, and so does
+the full 576-test suite. `in_frustum` is kept, `#[cfg(test)]`, as that reference.
+
+No memory change: the added state is 24 f32 temporaries on the stack.
 
 **Its cost, stated plainly:** the patch trades a per-call allocation for retained scratch, about
 110 KiB per `PageRuns` instance and roughly 430 KiB across the four, on a working set measured at

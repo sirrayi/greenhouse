@@ -166,6 +166,11 @@ frame-level CPU win needs a machine whose CPU is the bottleneck at the tested sc
 one is not, at any render distance tested, and which is exactly what the project's own
 9800X3D/5080 reports describe.
 
+Ocean is worse, not better, and settles the question without needing its own A/B: an earlier
+pristine run of the same binary shows `gpu_p50` of 7.1–8.7 ms against `cpu_p50` of 3.0–3.7 ms. The
+GPU is twice the CPU there. The scene with the worst 1% lows in the published data is the scene
+where this machine has the least CPU headroom to give back.
+
 This is worth stating plainly because it is the difference between "the patch works" and "the
 patch is worth having on your machine": the first is measured, the second depends on your GPU.
 

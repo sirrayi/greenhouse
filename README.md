@@ -307,13 +307,16 @@ frame. Verified by the full 576-test suite with it applied alongside the other t
 ## Verified end to end
 
 `horizon-mixins check` stages a pristine export of the pinned revision, injects greenhouse, and
-runs the game's own tests against the patched tree:
+runs the game's own tests against the patched tree. **At the pinned `68ac6f6` (Nightly
+2026-10-31)**, which is the revision the v0.3.0 archive is built on:
 
 ```
-status: ok    injections: 1    modules: 1
-cargo 451 s   test run 43.5 s
-test result: ok. 576 passed; 0 failed; 16 ignored
+status: ok    injections: 2    modules: 1
+test result: ok. 700 passed; 0 failed; 21 ignored      (zero warnings)
 ```
+
+An earlier pin, `ba6344a` (Nightly 2026-10-30), was the same bundle with one injection and a
+576-test suite; the numbers below are from that run and the block above is the current one.
 
 So on macOS the whole vehicle works — export, plan, apply, inject, compile — and the result is
 behaviour-preserving by Horizon's own measure: every one of the 576 tests in

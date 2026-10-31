@@ -2,7 +2,9 @@
 
 Measured, not assumed. Every row below is the result of running the real
 `horizon-mixins` CLI (pinned revision `d9c83d7`, plan schema 6) against a pristine export of
-Horizon at `ba6344a59` and reading the result.
+Horizon at `ba6344a59` (Nightly 2026-10-30) and reading the result. The bundle was later re-pinned
+to `68ac6f647` (Nightly 2026-10-31) after checking that both targets, `PageRuns::push` and
+`Renderer::render`, still have the shape the hooks expect.
 
 ## Environment
 

@@ -1,11 +1,11 @@
 [mod]
 id = "greenhouse"
-version = "0.2.0"
+version = "0.3.0"
 priority = 100
 
 [compatibility]
-# The tagged Nightly this bundle is pinned to (nightly-source/2026-10-30-ba6344a).
-horizon_revision = "ba6344a59cb9e755b730dcf02285fc0d33b97d3c"
+# The tagged Nightly this bundle is pinned to (nightly-source/2026-10-31-68ac6f6).
+horizon_revision = "68ac6f647e7022b2c696e81863d7cface28c9416"
 
 # The support module: compiled inside Horizon, and the same file is the
 # standalone testable crate (see Cargo.toml).

@@ -91,7 +91,7 @@ Everything is individually switchable: `HORIZON_GREENHOUSE=off` disables the mod
 | ID | Change | Expressible as a mixin? | Output identical? | Speedup |
 | --- | --- | --- | --- | --- |
 | `push-band` | Factors the band arithmetic out of `PageRuns::push` and counts pushed runs, so the draw volume becomes observable | **Yes** (closure-free body) | **Yes**, and tested | None by design — a scaffold |
-| `regroup_counting` | Stable counting sort over the `(band, page)` key instead of `sort_by_key` + a double scratch copy | **No** — `regroup`'s body contains closures | **Yes**, proven by 12 equivalence tests | Unmeasured |
+| `regroup_counting` | Stable counting sort over the `(band, page)` key instead of `sort_by_key`, which allocates an `n/2` buffer on every call (4 calls a frame) | **Not as a mixin** — the body has closures. **Ships as a patch** (`patches/0001`) | **Yes** — 12 equivalence tests, plus Horizon's own 576 tests | Unmeasured |
 | `regroup_early_out` | Skip regrouping when the run list is already key-sorted, not only when every run shares one page | **No** — same function | **Yes**, proven | Unmeasured |
 | `sort_unstable` | Translucent sort without a stable sort's allocation | **No** — `sort_by` body contains closures | **Yes**, proven by 5 equivalence tests | ~none (see below) |
 
@@ -137,11 +137,56 @@ because insertion sort is used below ~20 elements and is stable regardless.
 | `regroup_counting` / `sort_unstable` equivalent | **Proven** by `cargo test` |
 | Either of them shipped as a working hook | **Blocked** by the OVERWRITE limitation |
 | The patched game compiles and passes its tests | **Confirmed** — see below |
+| `patches/0001` applies to the pinned revision | **Confirmed** — `tools/apply-patches.sh --check` |
+| `patches/0001` passes Horizon's 576 tests | **Confirmed** — `576 passed; 0 failed` |
 | Any FPS measurement | **Not started** |
 
 **Nothing here has been benchmarked.** Every measurement attempted was taken with the machine
 at load 23–27 on 8 cores; a microbenchmark swung between −55% and +148% on identical inputs
 run to run. Those numbers are worse than no numbers.
+
+## Two delivery paths, and why there have to be two
+
+`horizon-mixins` cannot express the changes that matter here (see
+[docs/capabilities.md](docs/capabilities.md)): it will not rewrite a body containing a closure,
+and it cannot substitute a function returning borrowed data. Horizon's hot renderer functions are
+both. So the same repository carries two things, each labelled with what it is:
+
+**1. A mixin mod** — `mixins/greenhouse/`. Launcher-installable once registered, builds on the
+player's copy, individually switchable. Currently limited to closure-free functions: it ships one
+behaviour-identical scaffold and an instrumentation counter.
+
+**2. A patch series** — `patches/`, applied with `tools/apply-patches.sh <horizon-checkout>`.
+Everything a mixin cannot express. Not launcher-installable, and honest about it: you apply it to
+a checkout at the pinned revision and build.
+
+```sh
+tools/apply-patches.sh ~/horizon --check   # verifies it applies, writes nothing
+tools/apply-patches.sh ~/horizon           # applies
+cd ~/horizon && cargo build --release -p horizon-client --bins
+```
+
+### `patches/0001-counting-sort-draw-regrouping.patch`
+
+`PageRuns::regroup` groups a frame's section draws by arena page within distance bands. It uses
+`sort_by_key`, a stable merge sort that allocates an `n/2` scratch buffer on **every** call, and
+there are four calls a frame. The key is `band << 32 | page` over a key space of a few dozen bands
+by a few pages, so a stable counting sort does the same work in O(n) with no allocation — stable
+by construction, because entries are placed into bucket cursors in input order.
+
+It also replaces the early-out. Horizon skips regrouping only when every run shares one page; the
+patch skips it whenever the run list is already key-sorted, which is strictly more general at the
+same O(n) and is the common case once sections cluster in a page.
+
+Verified: 12 equivalence tests against a reference copy of Horizon's own code, plus **Horizon's
+full 576-test render suite passing with the patch applied**
+(`test result: ok. 576 passed; 0 failed; 16 ignored`).
+
+**Its cost, stated plainly:** the patch trades a per-call allocation for retained scratch, about
+110 KiB per `PageRuns` instance and roughly 430 KiB across the four, on a working set measured at
+1082 MB. That is +0.04% resident memory to remove four allocations a frame. If that trade is
+unacceptable on an 8 GB machine, the buffers can be shared across the four instances, since
+`regroup` is never reentrant — but it has not been done, and it is not claimed.
 
 ## Verified end to end
 

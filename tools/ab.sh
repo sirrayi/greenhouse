@@ -59,22 +59,28 @@ for scene in $scenes; do
         total=$((total + 1))
     done
 done
+# Each arm gets its own working directory: the benchmark creates the world
+# under ./saves and writes reports under ./benchmarks, and two arms sharing a
+# directory would let the second reuse chunks the first generated.
+work="$out/$label"
+mkdir -p "$work"
 echo "==> $label: $total runs ($repeats x $scenes at RD $rd, offscreen)"
 echo "    binary: $bin"
+echo "    workdir: $work"
 
 for scene in $scenes; do
     i=1
     while [ "$i" -le "$repeats" ]; do
         # --offscreen renders into a texture and never shows or focuses a window,
         # so a run cannot be disturbed by whatever else is on the desktop.
-        "$bin" \
+        cd "$work" && "$bin" \
             --resources "$RESOURCES" \
             --benchmark "$scene" \
             --offscreen \
             --render-distance "$rd" \
             --width 1280 --height 720 \
-            > "$out/$label-$scene-rd$rd-$i.log" 2>&1 || {
-                echo "error: run failed, see $out/$label-$scene-rd$rd-$i.log" >&2
+            > "$work/$scene-rd$rd-$i.log" 2>&1 || {
+                echo "error: run failed, see $work/$scene-rd$rd-$i.log" >&2
                 exit 1
             }
         echo "    $scene repeat $i done"

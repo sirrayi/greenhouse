@@ -41,14 +41,23 @@ def t95(n):
 def load(directory):
     """{scene: {rd: {metric: [values]}}} from every report in `directory`."""
     groups = {}
-    files = sorted(glob.glob(f"{directory}/*.json"))
+    # Recursive: each arm runs in its own working directory and writes its
+    # reports under ./benchmarks there.
+    files = sorted(glob.glob(f"{directory}/**/*.json", recursive=True))
     if not files:
         sys.exit(f"error: no reports in {directory}")
+    reports = 0
     for path in files:
         with open(path) as handle:
-            report = json.load(handle)
-        if report.get("format") != "horizon-benchmark-report":
-            sys.exit(f"error: not a Horizon benchmark report: {path}")
+            try:
+                report = json.load(handle)
+            except json.JSONDecodeError:
+                continue
+        # A run's working directory also holds the world's own JSON (player
+        # data, advancements); only the benchmark reports are data here.
+        if not isinstance(report, dict) or report.get("format") != "horizon-benchmark-report":
+            continue
+        reports += 1
         conditions = report.get("conditions", {})
         rd = conditions.get("render_distance")
         if conditions.get("offscreen"):

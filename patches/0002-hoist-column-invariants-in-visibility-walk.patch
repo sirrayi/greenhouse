@@ -1,8 +1,21 @@
 diff --git a/crates/horizon-client-render/src/gfx/resident.rs b/crates/horizon-client-render/src/gfx/resident.rs
-index eb5727caa..b4a57d2ef 100644
+index eb5727caa..824f7600e 100644
 --- a/crates/horizon-client-render/src/gfx/resident.rs
 +++ b/crates/horizon-client-render/src/gfx/resident.rs
-@@ -181,6 +181,11 @@ fn in_view(key: SectionKey, camera: DVec3, radius: i32, frustum: &Frustum) -> Op
+@@ -151,6 +151,12 @@ pub struct Visible {
+ }
+ 
+ /// The camera-relative origin of the section at `key`.
++///
++/// `Resident::visible` no longer calls this -- it computes the column's
++/// invariant components once and only the section's y per section -- so in a
++/// build without tests this is dead code. The tests use it, and it is the
++/// reference they compare against.
++#[cfg(test)]
+ fn origin(key: SectionKey, min_y: i32, camera: DVec3) -> DVec3 {
+     DVec3::new(
+         f64::from(key.0 * 16),
+@@ -181,6 +187,11 @@ fn in_view(key: SectionKey, camera: DVec3, radius: i32, frustum: &Frustum) -> Op
  
  /// `in_view` without the distance test; `inside`: the section's column is
  /// entirely inside the frustum, so the section is too.
@@ -14,7 +27,7 @@ index eb5727caa..b4a57d2ef 100644
  fn in_frustum(
      key: SectionKey,
      min_y: i32,
-@@ -219,31 +224,78 @@ impl<T> Resident<T> {
+@@ -219,31 +230,78 @@ impl<T> Resident<T> {
          out: &mut Vec<Visible>,
      ) {
          let from = camera_column(camera);

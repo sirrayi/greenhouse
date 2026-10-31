@@ -133,6 +133,42 @@ inflated and is kept here only as the illustration: a debug build cannot inline 
 flatters any change that removes redundancy. Reporting 52% would have been a lie in the flattering
 direction, which is the easiest kind to tell by accident. The honest figure is 19.6%.
 
+## The frame-level A/B, and why it cannot settle this on this machine
+
+Patches 0002 and 0003 were built into real `horizon-client` binaries and run against the pristine
+build, interleaved A/B/A/B, on Apple M1 (8 cores, integrated 8-core GPU), render distance 32,
+1280x720, offscreen, 5 repeats per scene. `tools/ab-pair.sh` interleaves so a steady background
+load lands on both arms; `tools/ab-compare.py` reports each arm's mean with its 95% interval and
+says whether the intervals separate.
+
+Village, four pairs before the machine got busy:
+
+| arm | avg FPS | 1% low | p50 | cpu_p50 | gpu_p50 |
+| --- | --- | --- | --- | --- | --- |
+| pristine | 207.2, 206.9, 199.9, 192.7 | 149, 148, 130, 133 | 4.80–5.19 | 2.44–2.69 | 4.32–4.63 |
+| patched | 223.2, 200.4, 194.3, 82.4 | 163, 127, 119, 1.7 | 4.45–5.12 | 2.33–2.84 | 3.92–4.58 |
+
+The verdict is **overlapping — no result**, and that is the correct answer rather than a
+disappointment. Two things in the data explain it, and neither is a defect in the patch:
+
+1. **This machine is GPU-bound at render distance 32.** `gpu_p50` is about 4.4 ms against
+   `cpu_p50` of about 2.5 ms. The CPU has finished its frame long before the GPU has. Removing
+   CPU work cannot raise a frame rate that the GPU sets. The published 9800X3D + RTX 5080 figures
+   are CPU-bound; this M1 is not the same machine at all.
+2. **One patched run was contaminated** (82 FPS, 1% low 1.7 against 119–163 in its siblings),
+   which is what makes the patched interval ±87 and produces the "overlapping" verdict. That run
+   overlapped with outside work; interleaving does not rescue a sample that collides with a
+   compile, it only stops such collisions from landing on one arm preferentially.
+
+So the honest state after both measurements: **patch 0002 makes the visibility walk 19.6% faster,
+and that gain is invisible in frame rate on hardware where the GPU is the limit.** To show a
+frame-level CPU win needs a machine whose CPU is the bottleneck at the tested scene — which this
+one is not, at any render distance tested, and which is exactly what the project's own
+9800X3D/5080 reports describe.
+
+This is worth stating plainly because it is the difference between "the patch works" and "the
+patch is worth having on your machine": the first is measured, the second depends on your GPU.
+
 ## The measurement that changed a decision
 
 Function-level microbenchmarks were run under load using the minimum over 200 samples, since a

@@ -23,6 +23,15 @@ scenes=${*:-village ocean}
 [ -x "$a" ] && [ -x "$b" ] || { echo "error: both arms must be executable" >&2; exit 1; }
 
 rd=${SCENE_RD:-32}
+# Render target. Shrinking it is how a GPU-bound machine is made CPU-bound: the
+# frame's CPU work (visibility, draw list, culling) does not depend on the
+# number of pixels, but the GPU's does. At 480x270 on an M1 the GPU drops below
+# the CPU and a CPU-side change finally has somewhere to show. It is not a
+# player configuration and it is not meant to be one; it is a controlled
+# experiment, and both arms get the same target.
+win=${WINDOW:-1280x720}
+w=${win%x*}
+h=${win#*x}
 repeats=${REPEATS:-5}
 attempts=${ATTEMPTS:-3}
 out=${OUT:-./ab-reports}
@@ -84,7 +93,7 @@ run_one() {  # $1 = label, $2 = binary, $3 = scene, $4 = repeat
     ( cd "$work" && HORIZON_NO_AUDIO=1 "$bin" \
         --resources "$RESOURCES" \
         --benchmark "$scene" --offscreen \
-        --render-distance "$rd" --width 1280 --height 720 \
+        --render-distance "$rd" --width "$w" --height "$h" \
         > "$work/$scene-rd$rd-$rep.log" 2>&1 ) &
     game=$!
 

@@ -142,7 +142,8 @@ because insertion sort is used below ~20 elements and is stable regardless.
 | Each patch applies to a pristine checkout on its own | **Confirmed** — `--only <name>` for each |
 | Each change is individually switchable | **Confirmed** — `--only` / `--except` |
 | A `regroup` sort replacement | **Measured 34-46% slower; removed** |
-| Frame rate A/B, pristine vs patched, RD 32 | **Run; no result** — the M1 is GPU-bound (gpu 4.4 ms vs cpu 2.5 ms), so a CPU win cannot show |
+| Frame rate A/B, pristine vs patched, RD 32, 5 paired runs | **Run; negative** — nothing significant, including 1% lows; the M1 is GPU-bound and the effect is below the noise |
+| GPU time unchanged by the patches | **Confirmed** — 3.595 vs 3.589 ms, the negative control |
 
 **Nothing here has been benchmarked.** Every measurement attempted was taken with the machine
 at load 23–27 on 8 cores; a microbenchmark swung between −55% and +148% on identical inputs

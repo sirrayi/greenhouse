@@ -21,7 +21,12 @@ import math
 import statistics
 import sys
 
-METRICS = ("avg_fps", "low_1pct_fps", "low_01pct_fps", "p50_ms", "p999_ms")
+# `cpu_p50_ms` is the one that answers "did the CPU work shrink", and it stays
+# meaningful on a GPU-bound machine: the CPU still does its work every frame,
+# it simply is not what sets the frame time. `gpu_p50_ms` is there so a reader
+# can see which of the two was the limiter.
+METRICS = ("avg_fps", "low_1pct_fps", "low_01pct_fps", "p50_ms", "p999_ms",
+           "cpu_p50_ms", "gpu_p50_ms")
 
 # Student's t, two-sided 95%, by degrees of freedom. Beyond the table, 1.96.
 T95 = {1: 12.706, 2: 4.303, 3: 3.182, 4: 2.776, 5: 2.571, 6: 2.447,

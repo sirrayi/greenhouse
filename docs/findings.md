@@ -174,6 +174,45 @@ where this machine has the least CPU headroom to give back.
 This is worth stating plainly because it is the difference between "the patch works" and "the
 patch is worth having on your machine": the first is measured, the second depends on your GPU.
 
+## The frame-level A/B: completed, and negative
+
+Both patches built into real `horizon-client` binaries, pristine against patched, **interleaved
+A/B/A/B**, render distance 32, village, offscreen, 5 pairs, Apple M1 (8 cores, integrated GPU).
+
+`tools/ab-pair.sh` interleaves so background load lands on both arms; the analysis below is
+**paired** (each patched run against the pristine run taken immediately after it), which is the
+right test for a paired design and cancels slow drift.
+
+| metric | pristine | patched | paired diff | t (df=4) | patched lower in |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| `cpu_p50_ms` | 2.449 | 2.422 | −0.027 ms (−1.1%) | −0.80 | 3 / 5 |
+| `gpu_p50_ms` | 3.595 | 3.589 | −0.007 ms | −0.16 | 3 / 5 |
+| `avg_fps` | 241.5 | 241.1 | −0.4 FPS | −0.15 | 4 / 5 |
+| `low_1pct_fps` | 154.4 | 151.6 | −2.8 FPS | −0.82 | 3 / 5 |
+| `p50_ms` | 4.108 | 4.120 | +0.012 ms | +0.24 | 1 / 5 |
+
+Significance at df=4 is |t| > 2.776. **Nothing here is significant, including the 1% lows.** The
+result is a negative one and it is reported as such.
+
+Three things make it interpretable rather than just null:
+
+1. **The negative control passes.** `gpu_p50_ms` is unchanged to within 7 µs, and it is unchanged
+   *by construction*: the patch touches no GPU work. A change that moved GPU time would mean the
+   patch was doing something it does not claim.
+2. **The machine is GPU-bound.** GPU 3.6 ms against CPU 2.4 ms at this scene. The CPU finishes its
+   frame before the GPU does, so frame rate is set by the GPU and a CPU saving cannot appear in it.
+   Shrinking the render target to 480x270 barely moved the GPU (4.4 → 3.6 ms), which says Horizon's
+   GPU cost here is **geometry-bound, not fill-bound** — so the usual trick of shrinking the window
+   cannot make this machine CPU-bound either.
+3. **The effect is below the noise.** The function-level win is 106 µs off the walk. On a 2.4 ms
+   CPU frame with run-to-run sd near 60 µs, resolving ~30-50 µs needs on the order of 20 paired
+   runs, not 5.
+
+So the honest state after both measurements: **the patch is proven to make the visibility walk
+19.6% faster, and that gain does not reach the frame rate on this hardware at this scene.** No
+claim is made that it raises FPS or 1% lows, because on the only machine available it does not
+measurably do either.
+
 ## The measurement that changed a decision
 
 Function-level microbenchmarks were run under load using the minimum over 200 samples, since a

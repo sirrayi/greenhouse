@@ -213,6 +213,32 @@ So the honest state after both measurements: **the patch is proven to make the v
 claim is made that it raises FPS or 1% lows, because on the only machine available it does not
 measurably do either.
 
+## Why this machine cannot be made CPU-bound
+
+The frame-level A/B is only informative where the CPU sets the frame time. Three separate attempts
+to get there, all on Apple M1 (8-core integrated GPU), render distance 32, village:
+
+| attempt | CPU p50 | GPU p50 | frame p50 | outcome |
+| --- | ---: | ---: | ---: | --- |
+| 1280x720, default graphics | 2.45 ms | 3.60 ms | 4.11 ms | GPU-bound |
+| 480x270 (1/7 the pixels) | 2.51 ms | 3.60 ms | 4.08 ms | GPU-bound; shrinking the target barely moves the GPU |
+| clouds off (`renderClouds:"false"`) | 3.05 ms | 5.02 ms | 5.63 ms | GPU-bound |
+
+The second row is the informative one: cutting the pixel count by 7x left GPU time unchanged. That
+means Horizon's GPU cost on this hardware is **geometry-bound, not fill-bound** — it is paying for
+triangles, not for shading pixels. And because triangle count and visible-section count scale
+together with render distance, no render distance flips the ratio either: the GPU stays about 1.4x
+the CPU at the distances tested.
+
+So there is no configuration available here in which a CPU saving can reach the frame rate. That is
+not a limit of the patches; it is a property of the machine. It is also why the project's own
+published numbers come from a Ryzen 7 9800X3D with an RTX 5080, where the CPU is the constraint and
+Horizon's 1% lows are the thing worth improving.
+
+A useful consequence for anyone repeating this: the `cpu_p50_ms` and `gpu_p50_ms` fields in the
+report tell you which regime you are in before you spend an hour of runs. If GPU p50 exceeds CPU
+p50, a CPU change cannot move your frame rate, and no amount of repeats will make it.
+
 ## The measurement that changed a decision
 
 Function-level microbenchmarks were run under load using the minimum over 200 samples, since a

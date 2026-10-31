@@ -275,6 +275,49 @@ reproduces. Its effect on a whole frame at this scene, on this machine, is **bel
 of the measurement**. Both statements are true and only the first supports a claim that it makes
 Horizon faster for a player.
 
+## Where a slow frame actually goes, measured
+
+`HORIZON_SPIKES=6` makes the game print a span breakdown for every frame slower than 6 ms. One
+run at render distance 32, ocean, offscreen, Apple M1, flagged 78 slow frames out of ~1000:
+
+```
+frame p50 12.32 ms = cpu 3.16 + gpu 10.63      (GPU is 86% of the frame)
+```
+
+Spans inside those 78 slow frames (median and worst, milliseconds):
+
+| span | frames | median | worst |
+| --- | ---: | ---: | ---: |
+| `renderer` | 78 | 11.4 | 19.1 |
+| `encode` | 75 | 2.2 | 6.2 |
+| `lt_block` | 5 | 1.8 | 1.9 |
+| `clouds` | 11 | 1.7 | 4.3 |
+| `streaming` | 8 | 1.6 | 3.6 |
+| `update_world` | 42 | 1.2 | 20.1 |
+| `upload` | 20 | 0.9 | 1.7 |
+| `entity_geometry` | 11 | 0.6 | 19.8 |
+| `visibility` | 54 | 0.6 | 0.8 |
+
+Three things this settles, none of them by argument:
+
+1. **`renderer` is 11.4 of a 12.3 ms frame**, and the frame is 86% GPU. The slow frames are not
+   the CPU falling behind; they are the GPU taking longer. `submit` — waiting on the GPU queue —
+   shows up at 12.2 ms in the worst frame.
+2. **`visibility`, the function patch 0002 rewrites, is 0.6 ms** of a 12.3 ms frame: under 5%. A
+   19.6% improvement there is about 0.12 ms, or 1% of the frame — which is precisely what the
+   frame-level A/B failed to resolve. The function measurement and the frame measurement now agree,
+   and the disagreement was never between them: it was my hope that 1% would show through the
+   noise.
+3. **The CPU costs that are worth attacking on a CPU-bound machine are elsewhere**: `encode` at
+   2.2 ms median across 75 of 78 slow frames, `clouds` at 1.7 ms, `upload` at 0.9 ms, and rare
+   spikes in `entity_geometry` (19.8 ms) and `update_world` (20.1 ms). None of them is the
+   visibility walk, and none of them is what this repository currently patches.
+
+That last point is the honest correction to this project's own premise. `visibility` looked like
+the biggest single CPU stage, and on a machine with a fast GPU it may be — but the span data says
+that on this one it is a 5% slice, and the stalls that actually hurt are `encode` and a handful of
+rare rebuilds.
+
 ## The measurement that changed a decision
 
 Function-level microbenchmarks were run under load using the minimum over 200 samples, since a

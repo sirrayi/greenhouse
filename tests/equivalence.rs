@@ -234,7 +234,7 @@ mod regroup_tests {
         for blocks in [0.0f64, 1.0, 63.9, 64.0, 64.1, 127.9, 128.0, 1023.0, 2048.0, 1.0e6] {
             let distance = (blocks * blocks).to_bits();
             let inline = (f64::from_bits(distance).sqrt() / BAND) as u64;
-            assert_eq!(band_of(distance), inline, "{blocks} blocks");
+            assert_eq!(band_of(BAND, distance), inline, "{blocks} blocks");
         }
     }
 

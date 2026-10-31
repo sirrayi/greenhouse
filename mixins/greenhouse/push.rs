@@ -16,7 +16,7 @@ fn push(
     tag: [u32; 3],
 ) {
     if len > 0 {
-        let band = greenhouse::band_of(distance);
+        let band = greenhouse::band_of(BAND, distance);
         greenhouse::count_push();
         runs.runs.push(Run {
             key: band << 32 | u64::from(page),

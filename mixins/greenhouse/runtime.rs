@@ -130,7 +130,9 @@ pub fn sort_quads(
 // `sort_by_key` produces.
 // ---------------------------------------------------------------------------
 
-/// The width of a band, in blocks (Horizon's `page_runs::BAND`).
+/// The width of a band, in blocks. The patch passes Horizon's own
+/// `page_runs::BAND`, so the two cannot drift and Horizon's constant stays
+/// used (an unused one would fail its `-D warnings`).
 pub const BAND: f64 = 64.0;
 
 /// One section's draws: `start..start + len` of the list (Horizon's `Run`).
@@ -148,8 +150,8 @@ pub struct Run {
 ///
 /// Factored out of `push` so the injected body has something real to call, and
 /// so the arithmetic has exactly one home. Bit-identical to the inline form.
-pub fn band_of(distance: u64) -> u64 {
-    (f64::from_bits(distance).sqrt() / BAND) as u64
+pub fn band_of(band: f64, distance: u64) -> u64 {
+    (f64::from_bits(distance).sqrt() / band) as u64
 }
 
 /// How many runs the draw list has been given, since process start.
@@ -165,9 +167,47 @@ pub fn count_push() {
 }
 
 /// The count so far.
-#[allow(dead_code)]
 pub fn pushes() -> u64 {
     PUSHES.load(std::sync::atomic::Ordering::Relaxed)
+}
+
+/// Frames the renderer has drawn, and the draw-run count at the last report.
+static FRAMES: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+static REPORTED: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+/// Frames between reports, unless `HORIZON_GREENHOUSE_REPORT` says otherwise
+/// (0 turns reporting off).
+const REPORT_EVERY: u64 = 600;
+
+fn report_every() -> u64 {
+    static EVERY: OnceLock<u64> = OnceLock::new();
+    *EVERY.get_or_init(|| {
+        std::env::var("HORIZON_GREENHOUSE_REPORT")
+            .ok()
+            .and_then(|v| v.trim().parse().ok())
+            .unwrap_or(REPORT_EVERY)
+    })
+}
+
+/// Called once per frame the renderer draws: reports the draw-list size,
+/// averaged over the frames since the last report.
+///
+/// That number decides how much work `regroup`, the indirect buffer and the
+/// command encoder each do, and Horizon reports it nowhere. Making it visible
+/// is the part this mod can actually ship.
+pub fn report_frame() {
+    let frames = FRAMES.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
+    let every = report_every();
+    if every == 0 || frames % every != 0 {
+        return;
+    }
+    let runs = pushes();
+    let previous = REPORTED.swap(runs, std::sync::atomic::Ordering::Relaxed);
+    let since = runs.saturating_sub(previous);
+    log::info!(
+        "greenhouse: {:.0} draw runs per frame over the last {every} frames ({runs} since start)",
+        since as f64 / every as f64
+    );
 }
 
 /// Horizon's `PageRuns`: the runs, and the scratch the rewrite gathers into.
@@ -187,7 +227,7 @@ impl PageRuns {
     /// Horizon's `push`: runs arrive nearest first.
     pub fn push(&mut self, distance: u64, page: u32, start: usize, len: usize, tag: [u32; 3]) {
         if len > 0 {
-            let band = (f64::from_bits(distance).sqrt() / BAND) as u64;
+            let band = band_of(BAND, distance);
             self.runs.push(Run {
                 key: band << 32 | u64::from(page),
                 start: start as u32,

@@ -168,7 +168,25 @@ Drop that file into your instance's `horizon-native-mods/` folder (beside `optio
 install it from the Mods page, then **Build**. Each release ships the archive, and the launcher
 checks it the way the registry does — Rust and TOML under `mixins/<id>/`, nothing run.
 
-**Be clear about what that installs.** It is the scaffold, not the performance work. The patches
+### What v0.2.0 does
+
+It reports the frame's **draw-list size**: how many draw runs the renderer pushed, averaged over
+the last 600 frames, logged once every 600 frames.
+
+```
+greenhouse: 3921 draw runs per frame over the last 600 frames (2354260 since start)
+```
+
+That number decides how much work `regroup`, the indirect buffer upload and the command encoder
+each do per frame, and Horizon reports it nowhere — it is the quantity every estimate in
+[docs/findings.md](docs/findings.md) was guessing at (the estimate was ~3,900 at render distance
+32, from `gfx/page_runs.rs`'s own comment). Watching it while changing render distance, or while
+walking into newly generated terrain, shows how the draw list grows.
+
+It is one relaxed atomic add per pushed run, one increment per frame, and a log line every 600
+frames. `HORIZON_GREENHOUSE_REPORT=<frames>` changes the interval; `0` turns reporting off.
+
+**It still does not improve performance**, and the scaffold is still a scaffold. The patches
 that actually remove CPU work cannot be shipped as a mod, because `horizon-mixins` cannot rewrite
 a function whose body contains a closure nor substitute one returning borrowed data
 ([docs/capabilities.md](docs/capabilities.md)). Installing also triggers a custom build of Horizon

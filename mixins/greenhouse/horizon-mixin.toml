@@ -1,6 +1,6 @@
 [mod]
 id = "greenhouse"
-version = "0.1.0"
+version = "0.2.0"
 priority = 100
 
 [compatibility]
@@ -31,3 +31,13 @@ bindings = [
   { name = "len", ty = "usize", value = "len" },
   { name = "tag", ty = "[u32; 3]", value = "tag" },
 ]
+
+# The observable part: once a frame, count it and report the draw-list volume.
+# `render`'s body contains closures, so OVERWRITE is out, but HEAD only
+# prepends and is accepted regardless.
+[[injection]]
+id = "frame-report"
+kind = "HEAD"
+target = "horizon_client_render::gfx::Renderer::render"
+helper = "frame.rs"
+bindings = []

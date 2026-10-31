@@ -100,13 +100,36 @@ world tick runs inside the frame with a cycle budget that already expects to be 
 - `spans::describe` filters spans below 0.5 ms, so a `visibility` span worth 0.2–0.35 ms never
   prints. A measurement build has to lower that filter, and there is a unit test pinning it.
 
+## The measurement that changed a decision
+
+Function-level microbenchmarks were run under load using the minimum over 200 samples, since a
+descheduled sample is only ever slower and the minimum approaches the uncontended time. Two of
+them were wrong before they were right, which is worth recording:
+
+1. The first version of the `regroup` benchmark reused one `PageRuns` across iterations. After the
+   first call the new code took its early-out and skipped the work entirely, reporting an 81%
+   improvement that was pure artifact.
+2. The first version of the visibility benchmark let the optimizer hoist the column-invariant
+   work in *both* arms, so the patch appeared to change nothing. The real walk calls an opaque
+   `reachable(key)` per section, which is what blocks that hoisting; once the benchmark modelled
+   it, the patch showed a real 12% off that loop.
+
+With both corrected, the answer for the sort change was not neutral but negative: sorting
+identical elements with only the comparator changed, the tie-break version is **34–46% slower**.
+It was removed. The visibility hoisting showed **12% off the walk** on a faithful model, and the
+readback change removes allocations that no microbenchmark can price.
+
+The rule this produced: a correctness proof says a change is *safe*, never that it is *faster*.
+Those are different claims and only one of them was being checked.
+
 ## What this means for the patches
 
 `0002` (visibility hoisting) is the best-supported change: the redundancy is unambiguous, the
 arithmetic is bit-identical by construction, and Horizon's own exact-bits oracle test proves it.
 `0003` (readback buffer) targets recurring allocator traffic, which is the 1% low flavour of the
-problem. `0001` is the weakest of the three as a *speed* claim, for the near-sorted-input reason
-above, and should be measured with the least expectation attached to it.
+problem. A third patch, for `regroup`'s sort, was measured and rejected — see above. None of the
+remaining two has been measured against a frame rate; both are still only proven not to change
+what is drawn.
 
 None of them touches the stall list, which is where the perceptible defect actually is. That work
 needs instrumentation first, not patches, and it is the honest next step.

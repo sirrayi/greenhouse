@@ -92,7 +92,6 @@ Everything is individually switchable: `HORIZON_GREENHOUSE=off` disables the mod
 | ID | Change | Expressible as a mixin? | Output identical? | Speedup |
 | --- | --- | --- | --- | --- |
 | `push-band` | Factors the band arithmetic out of `PageRuns::push` and counts pushed runs, so the draw volume becomes observable | **Yes** (closure-free body) | **Yes**, and tested | None by design — a scaffold |
-| `regroup_allocation_free` | Stable sort without the stable sort's per-call allocation, by tie-breaking on `start` instead | **Not as a mixin** — the body has closures. **Ships as a patch** (`patches/0001`) | **Yes** — 2 equivalence tests, plus Horizon's own 576 tests | Unmeasured |
 | `regroup_early_out` | Skip regrouping when the run list is already key-sorted, not only when every run shares one page | **No** — same function | **Yes**, proven | Unmeasured |
 | `sort_unstable` | Translucent sort without a stable sort's allocation | **No** — `sort_by` body contains closures | **Yes**, proven by 5 equivalence tests | ~none (see below) |
 
@@ -177,10 +176,9 @@ Every change can be built on its own, which is what makes each one measurable ag
 that differs in exactly one thing:
 
 ```sh
-tools/apply-patches.sh ~/horizon --only regroup      # 0001 alone
 tools/apply-patches.sh ~/horizon --only visibility   # 0002 alone
 tools/apply-patches.sh ~/horizon --only cull         # 0003 alone
-tools/apply-patches.sh ~/horizon --except cull       # 0001 + 0002
+tools/apply-patches.sh ~/horizon --except cull       # visibility only
 ```
 
 Each patch was checked to apply to a pristine checkout on its own, not only in series. `--check`
@@ -192,32 +190,31 @@ cache and the predictability. Build-time selection buys the same measurement wit
 shipped binary. The consequence is honest: switching a change off means rebuilding, not flipping
 a setting.
 
-### `patches/0001-allocation-free-draw-regrouping.patch`
+### A change that was measured and rejected
 
-`PageRuns::regroup` groups a frame's section draws by arena page within distance bands. It sorts
-by `key` with `sort_by_key`, and **that is a stable merge sort, so it allocates an `n/2` scratch
-buffer on every call — and there are four calls a frame.**
+An earlier version of this repository shipped three patches. The first replaced `regroup`'s stable
+`sort_by_key` with `sort_unstable_by_key(|r| (r.key, r.start))`, on the reasoning that the stable
+sort allocates an `n/2` buffer on every call and four calls happen a frame.
 
-Stability is only needed *among runs with equal keys*. Within one call `start` is strictly
-increasing, because `push` assigns the current draw count and skips empty runs. So `(key, start)`
-has no ties at all, and `sort_unstable_by_key(|r| (r.key, r.start))` must produce exactly the
-order a stable sort by `key` would — with no allocation and no scratch.
+It was correct — the tie-break provably reproduces the stable order, and Horizon's suite passed —
+and it was **slower**. Sorting identical elements with only the comparator changed, in nanoseconds
+per call, best of 200 samples:
 
-That is the whole change, plus a wider early-out: Horizon skips regrouping only when every run
-shares one page, and the patch also skips it whenever the run list is already key-sorted, which is
-strictly more general at the same O(n) and is the common case once sections cluster in a page.
+| runs | `sort_by_key` | unstable + tie-break | change |
+| ---: | ---: | ---: | ---: |
+| 600 | 7,750 | 11,250 | **+45%** |
+| 1,200 | 17,035 | 24,790 | **+46%** |
+| 2,500 | 41,512 | 58,052 | **+40%** |
+| 5,000 | 95,925 | 128,481 | **+34%** |
 
-An earlier version of this patch replaced the sort with a counting sort. That was **the wrong
-call and it is gone**: a counting sort needs a second buffer, which costs about 430 KiB of
-retained memory across four instances. This repository's rule is that no change trades memory for
-frame time, so the version that allocates nothing wins even though its asymptote is worse — the
-work is O(n log n) over a few thousand already-near-sorted elements.
+The reasoning was wrong in a way that is obvious in hindsight. `regroup`'s input is **already
+band-sorted** — `visible` is sorted by distance and shadow runs are pushed in depth order — and
+Rust's stable sort detects runs. A near-sorted stable sort is very fast, while a two-field
+comparator pays for the tuple on every comparison and gains nothing. Removing an allocation is
+not the same as removing work.
 
-Verified: 2 further equivalence tests (500 randomised run lists plus an all-equal-keys case)
-proving the unstable sort reproduces the stable order, Horizon's own three `page_runs` tests, and
-**Horizon's full 576-test render suite passing with the patch applied.**
-
-No memory change: the scratch `Vec`s the counting sort wanted are not there.
+The patch is gone from `patches/`. Its equivalence tests remain, because they are the evidence
+for *why* it looked safe, and [docs/findings.md](docs/findings.md) records the rejection.
 
 ### `patches/0002-hoist-column-invariants-in-visibility-walk.patch`
 

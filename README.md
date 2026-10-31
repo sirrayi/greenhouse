@@ -140,7 +140,7 @@ because insertion sort is used below ~20 elements and is stable regardless.
 | `patches/0001` applies to the pinned revision | **Confirmed** — `tools/apply-patches.sh --check` |
 | `patches/0001` passes Horizon's 576 tests | **Confirmed** — `576 passed; 0 failed` |
 | `patches/0002` is bit-identical to the reference walk | **Confirmed** — Horizon's exact-bits oracle test passes |
-| Both patches together pass all 576 tests | **Confirmed** — `576 passed; 0 failed` |
+| All three patches together pass all 576 tests | **Confirmed** — `576 passed; 0 failed` |
 | Any FPS measurement | **Not started** |
 
 **Nothing here has been benchmarked.** Every measurement attempted was taken with the machine
@@ -221,6 +221,21 @@ No memory change: the added state is 24 f32 temporaries on the stack.
 1082 MB. That is +0.04% resident memory to remove four allocations a frame. If that trade is
 unacceptable on an 8 GB machine, the buffers can be shared across the four instances, since
 `regroup` is never reentrant — but it has not been done, and it is not claimed.
+
+### `patches/0003-reuse-the-cull-readback-buffer.patch`
+
+`Cull::begin` reads back the GPU occlusion test's results and copied them into a **fresh `Vec<u32>`
+for every mapped readback — up to three a frame**, each sized by the frame's test count. It copies
+word by word rather than by `cast_slice` because the mapping is not guaranteed to be 4-byte aligned
+(a Vega 11 on Windows panicked there once). The patch copies into a buffer the struct keeps and
+reuses.
+
+This is the one patch aimed at **1% lows rather than throughput**: it removes recurring allocator
+traffic from the frame thread, which is the kind of thing that shows up as jitter long before it
+shows up in an average.
+
+Bounded cost: one retained `Vec` sized by the largest readback seen, instead of three allocations a
+frame. Verified by the full 576-test suite with it applied alongside the other two.
 
 ## Verified end to end
 

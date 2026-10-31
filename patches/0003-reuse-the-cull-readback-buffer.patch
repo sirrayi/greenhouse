@@ -1,0 +1,69 @@
+diff --git a/crates/horizon-client-render/src/gfx/cull.rs b/crates/horizon-client-render/src/gfx/cull.rs
+index 449401b96..92cd0f012 100644
+--- a/crates/horizon-client-render/src/gfx/cull.rs
++++ b/crates/horizon-client-render/src/gfx/cull.rs
+@@ -135,6 +135,8 @@ pub struct Cull {
+     test_data: Vec<[u32; 4]>,
+     test_slots: Vec<u32>,
+     test_indices: Vec<u32>,
++    /// The last readback's words, reused so each frame allocates nothing here.
++    words: Vec<u32>,
+     total: u64,
+     /// The frame tests every section, as culling was off.
+     probe: bool,
+@@ -325,6 +327,7 @@ impl Cull {
+             ),
+             phase2: buffer(device, "Section draws, phase 2", WORDS, PHASE2_USAGE),
+             phase2_capacity: 1,
++            words: Vec::new(),
+             tests: buffer(device, "Section tests", 16, TESTS_USAGE),
+             tests_capacity: 1,
+             test_data: Vec::new(),
+@@ -358,6 +361,10 @@ impl Cull {
+     /// the frame culls.
+     pub fn begin(&mut self, device: &wgpu::Device) -> bool {
+         let _ = device.poll(wgpu::PollType::Poll);
++        // Reused across every mapped readback and every frame: this used to
++        // allocate a fresh `Vec` per readback, up to three a frame, each sized
++        // by the frame's test count.
++        let mut words = std::mem::take(&mut self.words);
+         for i in 0..READBACKS {
+             let r = &mut self.readbacks[(self.next + i) % READBACKS];
+             if r.state.load(Ordering::Acquire) != MAPPED {
+@@ -366,18 +373,23 @@ impl Cull {
+             let mapped = r.buffer.slice(..r.slots.len() as u64 * 4);
+             if let Ok(data) = mapped.get_mapped_range() {
+                 // The mapping isn't guaranteed to be 4-byte aligned (a Vega 11
+-                // on Windows panicked in cast_slice), so copy the words out.
+-                let results: Vec<u32> = bytemuck::pod_collect_to_vec(&data);
++                // on Windows panicked in cast_slice), so copy the words out one
++                // at a time into the reused buffer.
++                words.clear();
++                words.extend(
++                    data.chunks_exact(4)
++                        .map(|w| u32::from_ne_bytes([w[0], w[1], w[2], w[3]])),
++                );
+                 let (mut hidden, mut indices) = (0, 0u64);
+-                for (&result, &n) in results.iter().zip(&r.indices) {
++                for (&result, &n) in words.iter().zip(&r.indices) {
+                     if result != r.stamp {
+                         hidden += 1;
+                         indices += u64::from(n);
+                     }
+                 }
+                 let share = indices as f32 / r.total.max(1) as f32;
+-                self.hidden = ([hidden, results.len()], share);
+-                for (&slot, &result) in r.slots.iter().zip(&results) {
++                self.hidden = ([hidden, words.len()], share);
++                for (&slot, &result) in r.slots.iter().zip(&words) {
+                     let slot = slot as usize;
+                     if slot >= self.seen.len() {
+                         self.seen.resize(slot + 1, false);
+@@ -388,6 +400,7 @@ impl Cull {
+             r.buffer.unmap();
+             r.state.store(FREE, Ordering::Release);
+         }
++        self.words = words;
+         self.stamp = self.stamp.wrapping_add(1).max(1);
+         self.test_data.clear();
+         self.test_slots.clear();

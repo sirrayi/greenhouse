@@ -337,6 +337,31 @@ the biggest single CPU stage, and on a machine with a fast GPU it may be — but
 that on this one it is a 5% slice, and the stalls that actually hurt are `encode` and a handful of
 rare rebuilds.
 
+## Upstream implemented this first
+
+Moving the pin from `ba6344a` (Nightly 2026-10-30) to `68ac6f6` (Nightly 2026-10-31) turned up
+something worth knowing before anyone reads the patch as unique work: **`Resident::visible` already
+does the hoisting on the newer commit.**
+
+At `68ac6f6` the column loop computes `ox`/`oz` once per column, keeps `min_x`/`min_z`, and squares
+the column's share of the distance once — `xz_sq = dx8*dx8 + dz8*dz8` — with the per-section work
+reduced to the `y` term. That is the same change `patches/0002` makes. It also splits the `inside`
+case into its own loop and adds **per-section bounds** (`section_box(min, self.bounds[slot])`), so
+sections are culled against a tight box instead of a fixed 16-cube, which is a better idea than the
+one the patch had.
+
+So `patches/0002` is **superseded**: it applies to `ba6344a` and conflicts at `68ac6f6`, and its
+benefit is already in the newer tree. The 19.6% measurement on the `ba6344a` walk is still true of
+that commit; it just describes work that upstream has since done independently and more
+thoroughly.
+
+`patches/0003` still applies at `68ac6f6` and is still the one that removes allocations rather than
+duplicating upstream arithmetic.
+
+The lesson generalises: a patch against a fast-moving rewrite has a shelf life measured in days,
+and the first thing to check before rebasing is whether the target function still looks the way you
+remembered it.
+
 ## The measurement that changed a decision
 
 Function-level microbenchmarks were run under load using the minimum over 200 samples, since a

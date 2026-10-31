@@ -142,7 +142,7 @@ because insertion sort is used below ~20 elements and is stable regardless.
 | `horizon-mixins` builds, plans and applies on macOS | **Confirmed** — `status: ok` |
 | OVERWRITE cannot rewrite a closure-bearing body | **Confirmed** by probe |
 | The patched game compiles and passes Horizon's tests | **Confirmed** — `576 passed; 0 failed` |
-| `patches/0002` applies to the pinned revision | **Confirmed** — `--check` |
+| `patches/0002` applies to the pinned revision | **Applies to `ba6344a`; conflicts at `68ac6f6`, where upstream already does the same hoisting** |
 | `patches/0002` is bit-identical to the reference walk | **Confirmed** — Horizon's exact-bits oracle test |
 | `patches/0002` is 19.6% faster on Horizon's own walk benchmark | **Confirmed at opt-level 3** — arms do not overlap |
 | `patches/0003` applies, compiles and passes the suite | **Confirmed** |

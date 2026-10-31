@@ -143,6 +143,8 @@ because insertion sort is used below ~20 elements and is stable regardless.
 | All three patches together pass all 576 tests | **Confirmed** — `576 passed; 0 failed` |
 | Each patch applies to a pristine checkout on its own | **Confirmed** — `--only <name>` for all three |
 | Each change is individually switchable | **Confirmed** — `--only` / `--except` |
+| `patches/0002` is 52% faster on Horizon's own walk benchmark | **Confirmed in a debug build**; optimized profile outstanding |
+| Any frame-rate measurement | **Not started** |
 | Any FPS measurement | **Not started** |
 
 **Nothing here has been benchmarked.** Every measurement attempted was taken with the machine

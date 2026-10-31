@@ -141,6 +141,8 @@ because insertion sort is used below ~20 elements and is stable regardless.
 | `patches/0001` passes Horizon's 576 tests | **Confirmed** — `576 passed; 0 failed` |
 | `patches/0002` is bit-identical to the reference walk | **Confirmed** — Horizon's exact-bits oracle test passes |
 | All three patches together pass all 576 tests | **Confirmed** — `576 passed; 0 failed` |
+| Each patch applies to a pristine checkout on its own | **Confirmed** — `--only <name>` for all three |
+| Each change is individually switchable | **Confirmed** — `--only` / `--except` |
 | Any FPS measurement | **Not started** |
 
 **Nothing here has been benchmarked.** Every measurement attempted was taken with the machine
@@ -167,6 +169,27 @@ tools/apply-patches.sh ~/horizon --check   # verifies it applies, writes nothing
 tools/apply-patches.sh ~/horizon           # applies
 cd ~/horizon && cargo build --release -p horizon-client --bins
 ```
+
+### Switching them individually
+
+Every change can be built on its own, which is what makes each one measurable against a baseline
+that differs in exactly one thing:
+
+```sh
+tools/apply-patches.sh ~/horizon --only regroup      # 0001 alone
+tools/apply-patches.sh ~/horizon --only visibility   # 0002 alone
+tools/apply-patches.sh ~/horizon --only cull         # 0003 alone
+tools/apply-patches.sh ~/horizon --except cull       # 0001 + 0002
+```
+
+Each patch was checked to apply to a pristine checkout on its own, not only in series. `--check`
+writes nothing and exits nonzero on a conflict or when nothing is selected.
+
+A runtime toggle inside the compiled game was considered and rejected: it would put a branch on
+hot paths purely to serve an A/B, and a branch that is always taken still costs the instruction
+cache and the predictability. Build-time selection buys the same measurement with no cost in the
+shipped binary. The consequence is honest: switching a change off means rebuilding, not flipping
+a setting.
 
 ### `patches/0001-allocation-free-draw-regrouping.patch`
 

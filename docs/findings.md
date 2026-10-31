@@ -230,8 +230,22 @@ triangles, not for shading pixels. And because triangle count and visible-sectio
 together with render distance, no render distance flips the ratio either: the GPU stays about 1.4x
 the CPU at the distances tested.
 
-So there is no configuration available here in which a CPU saving can reach the frame rate. That is
-not a limit of the patches; it is a property of the machine. It is also why the project's own
+A fourth attempt scanned render distance itself, on the theory that a smaller world might leave the
+CPU as the constraint. Village, 1280x720:
+
+| render distance | frame p50 | CPU p50 | GPU p50 | |
+| ---: | ---: | ---: | ---: | --- |
+| 6 | 1.10 ms | 0.43 | 0.94 | GPU-bound |
+| 10 | 1.38 ms | 0.43 | 1.30 | GPU-bound |
+| 16 | 2.19 ms | 0.87 | 2.11 | GPU-bound |
+| 24 | 3.38 ms | 1.52 | 3.30 | GPU-bound |
+| 32 | 4.87 ms | 2.57 | 4.36 | GPU-bound |
+
+The GPU is about twice the CPU at every distance. So there is no configuration available here in
+which a CPU saving can reach the frame rate: five independent axes were tried — render distance
+from 6 to 32, two window sizes down to 1/7 the pixels, clouds on and off, two scenes, and the span
+breakdown that shows the GPU at 86% of an ocean frame. That is not a limit of the patches; it is a
+property of the machine. It is also why the project's own
 published numbers come from a Ryzen 7 9800X3D with an RTX 5080, where the CPU is the constraint and
 Horizon's 1% lows are the thing worth improving.
 

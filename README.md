@@ -137,7 +137,7 @@ because insertion sort is used below ~20 elements and is stable regardless.
 | The patched game compiles and passes Horizon's tests | **Confirmed** — `576 passed; 0 failed` |
 | `patches/0002` applies to the pinned revision | **Confirmed** — `--check` |
 | `patches/0002` is bit-identical to the reference walk | **Confirmed** — Horizon's exact-bits oracle test |
-| `patches/0002` is 52% faster on Horizon's own walk benchmark | **Confirmed in a debug build**; optimized profile outstanding |
+| `patches/0002` is 19.6% faster on Horizon's own walk benchmark | **Confirmed at opt-level 3** — arms do not overlap |
 | `patches/0003` applies, compiles and passes the suite | **Confirmed** |
 | Each patch applies to a pristine checkout on its own | **Confirmed** — `--only <name>` for each |
 | Each change is individually switchable | **Confirmed** — `--only` / `--except` |

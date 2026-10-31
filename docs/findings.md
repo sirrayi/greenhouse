@@ -100,32 +100,38 @@ world tick runs inside the frame with a cycle budget that already expects to be 
 - `spans::describe` filters spans below 0.5 ms, so a `visibility` span worth 0.2–0.35 ms never
   prints. A measurement build has to lower that filter, and there is a unit test pinning it.
 
-## Measuring the real walk, not a model
+## Measuring the real walk: 19.6% off, at opt-level 3
 
-Horizon ships its own benchmark of the real `Resident::visible`: `resident::tests::column_walk_speed`,
-ignored by default, which builds a render-distance-32 world of 80,802 resident sections, runs the
-walk 200 times, keeps the best, and asserts it found exactly the sections a per-section reference
-walk found. `tools/measure-walk.sh` runs it pristine and patched.
+Horizon ships its own benchmark of the real `Resident::visible`:
+`resident::tests::column_walk_speed`, ignored by default. It builds a render-distance-32 world of
+80,802 resident sections, runs the walk 200 times, keeps the **best** run, and asserts the walk
+found exactly the sections a per-section reference walk found. Keeping the best is why a loaded
+machine can still give a usable number: a sample that was descheduled is only ever slower.
+`tools/measure-walk.sh` runs it pristine and patched.
 
-At commit `ba6344a`, **debug profile** (opt-level 0), 80,802 resident and 8,746 visible sections:
+Measured on an Apple M1 (8 cores) with the `fast` profile (opt-level 3, no LTO), while the machine
+was under heavy load from another process — which is exactly the condition the minimum estimator
+is for.
 
-| | column walk | checksum |
-| --- | ---: | ---: |
-| pristine | 13.31 ms | −15,940,400 |
-| patch 0002 | **6.33 ms** | −15,940,400 |
+| arm | column walk | runs |
+| --- | ---: | --- |
+| pristine | **542.3 µs** | 539.5, 542.5, 544.75 |
+| patch 0002 | **435.9 µs** | 422.5, 434.7, 445.5, 440.9 |
 
-A 52% reduction, with the identical checksum — which is the benchmark's own proof that the walk
-still finds the same sections in the same order.
+**19.6% off the walk**, and the two arms do not overlap: pristine's fastest run (539.5 µs) is
+slower than the patched arm's slowest (445.5 µs). The checksum is identical in every run
+(−15,940,400) and the visible count is identical (8,746), so the walk finds the same sections in
+the same order.
 
-**This number must not be quoted as the release gain.** A debug build does not inline or hoist,
-so it flatters exactly this kind of change: work the patch removes by hand is work the optimizer
-may already be removing for free in an optimized build. If LLVM's loop-invariant code motion
-already lifts the column's x and z out of the per-section loop, the release gain could be far
-smaller or nothing. That is the measurement still outstanding, and `measure-walk.sh` defaults to
-the `fast` profile for precisely that reason.
+This also settles the question that made the measurement worth taking: **the optimizer does not
+already remove this redundancy.** The concern was that loop-invariant code motion would hoist the
+column's x and z out of the per-section loop for free, making the patch pointless. It does not,
+and the patch is worth about a fifth of the walk.
 
-The distinction is the same one that killed the sort patch: a debug or model measurement can tell
-you a change is *real*, and only an optimized measurement can tell you it *matters*.
+The same comparison in a **debug** build read 13.31 ms → 6.33 ms, a 52% win. That number is
+inflated and is kept here only as the illustration: a debug build cannot inline or hoist, so it
+flatters any change that removes redundancy. Reporting 52% would have been a lie in the flattering
+direction, which is the easiest kind to tell by accident. The honest figure is 19.6%.
 
 ## The measurement that changed a decision
 

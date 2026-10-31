@@ -100,6 +100,33 @@ world tick runs inside the frame with a cycle budget that already expects to be 
 - `spans::describe` filters spans below 0.5 ms, so a `visibility` span worth 0.2–0.35 ms never
   prints. A measurement build has to lower that filter, and there is a unit test pinning it.
 
+## Measuring the real walk, not a model
+
+Horizon ships its own benchmark of the real `Resident::visible`: `resident::tests::column_walk_speed`,
+ignored by default, which builds a render-distance-32 world of 80,802 resident sections, runs the
+walk 200 times, keeps the best, and asserts it found exactly the sections a per-section reference
+walk found. `tools/measure-walk.sh` runs it pristine and patched.
+
+At commit `ba6344a`, **debug profile** (opt-level 0), 80,802 resident and 8,746 visible sections:
+
+| | column walk | checksum |
+| --- | ---: | ---: |
+| pristine | 13.31 ms | −15,940,400 |
+| patch 0002 | **6.33 ms** | −15,940,400 |
+
+A 52% reduction, with the identical checksum — which is the benchmark's own proof that the walk
+still finds the same sections in the same order.
+
+**This number must not be quoted as the release gain.** A debug build does not inline or hoist,
+so it flatters exactly this kind of change: work the patch removes by hand is work the optimizer
+may already be removing for free in an optimized build. If LLVM's loop-invariant code motion
+already lifts the column's x and z out of the per-section loop, the release gain could be far
+smaller or nothing. That is the measurement still outstanding, and `measure-walk.sh` defaults to
+the `fast` profile for precisely that reason.
+
+The distinction is the same one that killed the sort patch: a debug or model measurement can tell
+you a change is *real*, and only an optimized measurement can tell you it *matters*.
+
 ## The measurement that changed a decision
 
 Function-level microbenchmarks were run under load using the minimum over 200 samples, since a

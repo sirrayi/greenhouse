@@ -241,11 +241,16 @@ CPU as the constraint. Village, 1280x720:
 | 24 | 3.38 ms | 1.52 | 3.30 | GPU-bound |
 | 32 | 4.87 ms | 2.57 | 4.36 | GPU-bound |
 
-The GPU is about twice the CPU at every distance. So there is no configuration available here in
-which a CPU saving can reach the frame rate: five independent axes were tried — render distance
-from 6 to 32, two window sizes down to 1/7 the pixels, clouds on and off, two scenes, and the span
-breakdown that shows the GPU at 86% of an ocean frame. That is not a limit of the patches; it is a
-property of the machine. It is also why the project's own
+And a fifth attempt used `--test-terrain`, whose simple geometry should strip the GPU of most of
+its triangles: RD 16 gave CPU 0.55 against GPU 1.71, RD 32 gave CPU 1.29 against GPU 3.79. Still
+GPU-bound.
+
+The GPU is about twice the CPU in every configuration tried. Six independent axes — render distance
+6 to 32, two window sizes down to 1/7 the pixels, clouds on and off, two scenes, simple test
+terrain, and the span breakdown that puts the GPU at 86% of an ocean frame — and not one of them
+makes CPU work the constraint. That is not a limit of the patches; it is a property of the machine.
+Anyone can check it in a minute: run any scene, and if `gpu_p50_ms` exceeds `cpu_p50_ms`, a CPU
+change cannot move the frame rate there. It is also why the project's own
 published numbers come from a Ryzen 7 9800X3D with an RTX 5080, where the CPU is the constraint and
 Horizon's 1% lows are the thing worth improving.
 

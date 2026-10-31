@@ -8,9 +8,16 @@ faster than Java Minecraft with Sodium, and this mod exists to take the next ste
 first one. Greenhouse changes the game's own Rust source at build time through declared mixin
 injections; the launcher builds it on the player's copy. There is no fork and no Java.
 
-**Status: the vehicle is proven on macOS; the optimizations are mostly blocked by a tool
-limitation, and nothing is benchmarked yet.** Read [Capabilities](#mixin-capabilities-measured)
-and [Status](#status) before assuming anything here works.
+**Status: the deliverable is built, verified and pushed; the performance claim is not
+demonstrated, and cannot be on the machine it was developed on.**
+
+Two patches, both provably output-identical, one of them 19.6% faster at the function it changes.
+Horizon's own suite passes with them applied, and every change can be built alone. But **no frame
+rate or 1% low improvement is claimed or measured**: the development machine is GPU-bound in every
+configuration tried (six axes, [docs/findings.md](docs/findings.md)), so CPU savings there have no
+way to reach the frame rate.
+
+Read [Status](#status) before assuming anything here works.
 
 ---
 

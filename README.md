@@ -186,6 +186,22 @@ Both review passes converged on the same conclusion, and it is not "write a fast
    earlier hypothesis that blamed LOD geometry on the ocean 1% low was describing a scene the
    benchmark never built.
 
+## Measuring it
+
+Two tools, both of which refuse to produce a misleading number:
+
+- `tools/ab.sh <label> <binary> [scene...]` runs `--offscreen` benchmarks at render distance 32
+  and **refuses to start when the machine is busy** (exit 2), because a benchmark taken next to a
+  build is not a benchmark. Verified: at load 97 on 8 cores it declines rather than reports.
+- `tools/ab-compare.py <dir-a> <dir-b>` prints each arm's mean with its 95% interval and says
+  whether the intervals **separate** — the only thing that counts as evidence. Verified on
+  synthetic reports: it calls a +9.7% change with tight intervals separated, a +0.2% change with
+  wide ones overlapping, and refuses to adjudicate a single run at all.
+
+The methodology is deliberately narrow: RD 32 only, offscreen, repeats in the report's own
+`conditions`. RD 8 measurements are excluded because a 3-repeat run there has an interval wider
+than any change this project can produce.
+
 ## Rules this mod follows
 
 - **Identical output over speed.** A change that alters what is on screen is a parity bug, not

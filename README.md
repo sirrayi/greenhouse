@@ -91,7 +91,7 @@ Everything is individually switchable: `HORIZON_GREENHOUSE=off` disables the mod
 | ID | Change | Expressible as a mixin? | Output identical? | Speedup |
 | --- | --- | --- | --- | --- |
 | `push-band` | Factors the band arithmetic out of `PageRuns::push` and counts pushed runs, so the draw volume becomes observable | **Yes** (closure-free body) | **Yes**, and tested | None by design — a scaffold |
-| `regroup_counting` | Stable counting sort over the `(band, page)` key instead of `sort_by_key`, which allocates an `n/2` buffer on every call (4 calls a frame) | **Not as a mixin** — the body has closures. **Ships as a patch** (`patches/0001`) | **Yes** — 12 equivalence tests, plus Horizon's own 576 tests | Unmeasured |
+| `regroup_allocation_free` | Stable sort without the stable sort's per-call allocation, by tie-breaking on `start` instead | **Not as a mixin** — the body has closures. **Ships as a patch** (`patches/0001`) | **Yes** — 2 equivalence tests, plus Horizon's own 576 tests | Unmeasured |
 | `regroup_early_out` | Skip regrouping when the run list is already key-sorted, not only when every run shares one page | **No** — same function | **Yes**, proven | Unmeasured |
 | `sort_unstable` | Translucent sort without a stable sort's allocation | **No** — `sort_by` body contains closures | **Yes**, proven by 5 equivalence tests | ~none (see below) |
 
@@ -168,21 +168,32 @@ tools/apply-patches.sh ~/horizon           # applies
 cd ~/horizon && cargo build --release -p horizon-client --bins
 ```
 
-### `patches/0001-counting-sort-draw-regrouping.patch`
+### `patches/0001-allocation-free-draw-regrouping.patch`
 
-`PageRuns::regroup` groups a frame's section draws by arena page within distance bands. It uses
-`sort_by_key`, a stable merge sort that allocates an `n/2` scratch buffer on **every** call, and
-there are four calls a frame. The key is `band << 32 | page` over a key space of a few dozen bands
-by a few pages, so a stable counting sort does the same work in O(n) with no allocation — stable
-by construction, because entries are placed into bucket cursors in input order.
+`PageRuns::regroup` groups a frame's section draws by arena page within distance bands. It sorts
+by `key` with `sort_by_key`, and **that is a stable merge sort, so it allocates an `n/2` scratch
+buffer on every call — and there are four calls a frame.**
 
-It also replaces the early-out. Horizon skips regrouping only when every run shares one page; the
-patch skips it whenever the run list is already key-sorted, which is strictly more general at the
-same O(n) and is the common case once sections cluster in a page.
+Stability is only needed *among runs with equal keys*. Within one call `start` is strictly
+increasing, because `push` assigns the current draw count and skips empty runs. So `(key, start)`
+has no ties at all, and `sort_unstable_by_key(|r| (r.key, r.start))` must produce exactly the
+order a stable sort by `key` would — with no allocation and no scratch.
 
-Verified: 12 equivalence tests against a reference copy of Horizon's own code, plus **Horizon's
-full 576-test render suite passing with the patch applied**
-(`test result: ok. 576 passed; 0 failed; 16 ignored`).
+That is the whole change, plus a wider early-out: Horizon skips regrouping only when every run
+shares one page, and the patch also skips it whenever the run list is already key-sorted, which is
+strictly more general at the same O(n) and is the common case once sections cluster in a page.
+
+An earlier version of this patch replaced the sort with a counting sort. That was **the wrong
+call and it is gone**: a counting sort needs a second buffer, which costs about 430 KiB of
+retained memory across four instances. This repository's rule is that no change trades memory for
+frame time, so the version that allocates nothing wins even though its asymptote is worse — the
+work is O(n log n) over a few thousand already-near-sorted elements.
+
+Verified: 2 further equivalence tests (500 randomised run lists plus an all-equal-keys case)
+proving the unstable sort reproduces the stable order, Horizon's own three `page_runs` tests, and
+**Horizon's full 576-test render suite passing with the patch applied.**
+
+No memory change: the scratch `Vec`s the counting sort wanted are not there.
 
 ### `patches/0002-hoist-column-invariants-in-visibility-walk.patch`
 

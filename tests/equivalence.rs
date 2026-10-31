@@ -292,19 +292,10 @@ mod regroup_tests {
     }
 
     #[test]
-    fn falls_back_but_still_matches_when_bands_decrease() {
-        // Only reachable if `push`'s ordering invariant ever changes: the fast
-        // path must notice and defer to the reference, not produce garbage.
+    fn matches_even_when_bands_are_not_monotonic() {
+        // `push` feeds runs nearest first, so this cannot happen; the sort is
+        // still correct if it does, and must equal the reference.
         let runs = vec![(100.0, 1, 1), (10.0, 0, 1), (200.0, 1, 1)];
-        let (reference, fast) = both(&runs, 0);
-        assert_eq!(reference, fast);
-    }
-
-    #[test]
-    fn falls_back_but_still_matches_on_many_pages() {
-        // Past MAX_PAGES the counting sort defers; output must be identical.
-        let n = (MAX_PAGES + 8) as u32;
-        let runs: Vec<(f64, u32, u32)> = (0..n).map(|i| (i as f64, i, 1)).collect();
         let (reference, fast) = both(&runs, 0);
         assert_eq!(reference, fast);
     }
@@ -350,5 +341,50 @@ mod regroup_tests {
     fn matches_with_zero_length_runs() {
         let (reference, fast) = both(&[(1.0, 0, 0), (2.0, 1, 1), (3.0, 0, 0), (90.0, 1, 2)], 0);
         assert_eq!(reference, fast);
+    }
+}
+
+/// `regroup` needs a *stable* sort by key, which is why the original uses
+/// `sort_by_key` and pays for its `n/2` allocation. Within one call the runs
+/// arrive with strictly increasing `start` (`push` assigns the current draw
+/// count, and it skips empty runs), so `(key, start)` has no ties at all and an
+/// unstable sort must reproduce the stable order exactly -- with no scratch.
+mod stable_via_unstable {
+    use super::sort_tests::Lcg;
+
+    #[test]
+    fn sorting_by_key_and_start_equals_a_stable_sort_by_key() {
+        let mut rng = Lcg(0x00C0FFEE_D15EA5E);
+        for case in 0..500 {
+            let n = rng.below(200) as usize;
+            let pages = 1 + rng.below(9);
+            let mut start = 0u32;
+            let mut runs: Vec<(u64, u32)> = Vec::with_capacity(n);
+            for _ in 0..n {
+                let len = 1 + rng.below(3) as u32;
+                let band = rng.below(20);
+                let page = rng.below(pages);
+                runs.push((band << 32 | page, start));
+                start += len;
+            }
+            let mut stable = runs.clone();
+            stable.sort_by_key(|r| r.0);
+            let mut unstable = runs.clone();
+            unstable.sort_unstable_by_key(|r| (r.0, r.1));
+            assert_eq!(stable, unstable, "case {case}: {n} runs, {pages} pages");
+        }
+    }
+
+    #[test]
+    fn it_holds_with_every_run_in_one_band_and_page() {
+        // All keys equal: the order must be the arrival order, which is what
+        // ascending `start` already is.
+        let runs: Vec<(u64, u32)> = (0..64).map(|i| (7u64 << 32 | 3, i * 2)).collect();
+        let mut stable = runs.clone();
+        stable.sort_by_key(|r| r.0);
+        let mut unstable = runs.clone();
+        unstable.sort_unstable_by_key(|r| (r.0, r.1));
+        assert_eq!(stable, unstable);
+        assert_eq!(unstable, runs, "arrival order preserved");
     }
 }

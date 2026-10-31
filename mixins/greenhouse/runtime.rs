@@ -170,28 +170,13 @@ pub fn pushes() -> u64 {
     PUSHES.load(std::sync::atomic::Ordering::Relaxed)
 }
 
-/// Horizon's `PageRuns`, plus the scratch the counting sort reuses so the
-/// steady state allocates nothing.
+/// Horizon's `PageRuns`: the runs, and the scratch the rewrite gathers into.
 #[derive(Default)]
 #[allow(dead_code)]
 pub struct PageRuns {
     pub runs: Vec<Run>,
-    scratch: Vec<([u32; 5], (u32, Option<u32>))>,
-    runs_out: Vec<Run>,
-    draws_out: Vec<([u32; 5], (u32, Option<u32>))>,
-    dest: Vec<u32>,
-    counts: Vec<u32>,
-    bands: Vec<u64>,
-    pages_seen: Vec<u32>,
+    pub scratch: Vec<([u32; 5], (u32, Option<u32>))>,
 }
-
-/// Above this many distinct pages, or distinct (band, page) keys, the counting
-/// sort stops being obviously cheaper and the reference is used instead. Both
-/// are correct; this only decides which runs.
-#[allow(dead_code)]
-pub const MAX_PAGES: usize = 64;
-#[allow(dead_code)]
-pub const MAX_KEYS: usize = 4096;
 
 #[allow(dead_code)]
 impl PageRuns {
@@ -237,133 +222,39 @@ impl PageRuns {
         }
     }
 
-    /// The replacement: a stable counting sort over `(band, page)`.
+    /// The replacement: the same stable order, without the stable sort's
+    /// allocation.
+    ///
+    /// `regroup` needs stability only among runs with equal keys. Within one
+    /// call `start` is strictly increasing (`push` assigns the current draw
+    /// count and skips empty runs), so `(key, start)` has no ties and an
+    /// unstable sort reproduces the stable order exactly.
     pub fn regroup(
         &mut self,
         draws: &mut [[u32; 5]],
         pages: &mut [(u32, Option<u32>)],
         base: usize,
     ) {
-        // Already in final order? Then this is an identity, whatever the pages.
-        //
-        // Horizon only short-circuits when every run shares one page, which is
-        // the narrow special case. `push` feeds runs nearest first, so bands are
-        // non-decreasing and key order is (band, page); a run list that is
-        // already key-sorted needs no reordering, and because the runs cover
-        // `draws[base..]` contiguously in order, their `start`s are already the
-        // absolute indices `regroup` would rewrite them to. So the whole call is
-        // a no-op and the copy can be skipped.
-        //
-        // This is strictly more general than the page check at the same O(n),
-        // and it is the common case once sections cluster in a page.
+        let page = |r: &Run| r.key as u32;
+        if self.runs.windows(2).all(|w| page(&w[0]) == page(&w[1])) {
+            return;
+        }
+        // Already in final order: the runs cover `draws[base..]` contiguously,
+        // so their starts are already the indices the rewrite would set.
         if self.runs.windows(2).all(|w| w[0].key <= w[1].key) {
             return;
         }
-        if !self.counting_sort_runs() {
-            // Not the shape the fast path assumes: fall back to the reference.
-            // Reachable only if `push`'s distance order changes upstream.
-            self.regroup_reference(draws, pages, base);
-            return;
-        }
-        // Gather the draws in their new order, then write them back.
-        self.draws_out.clear();
-        self.draws_out.reserve(self.runs.len());
-        let mut placed = 0usize;
-        for r in &self.runs_out {
+        self.runs.sort_unstable_by_key(|r| (r.key, r.start));
+        self.scratch.clear();
+        for r in &mut self.runs {
             let (s, e) = (r.start as usize, (r.start + r.len) as usize);
-            self.draws_out
+            r.start = (base + self.scratch.len()) as u32;
+            self.scratch
                 .extend(draws[s..e].iter().copied().zip(pages[s..e].iter().copied()));
-            placed += r.len as usize;
         }
-        let mut at = base;
-        for r in &mut self.runs_out {
-            r.start = at as u32;
-            at += r.len as usize;
-        }
-        for (i, &(draw, p)) in self.draws_out.iter().enumerate() {
+        for (i, &(draw, p)) in self.scratch.iter().enumerate() {
             draws[base + i] = draw;
             pages[base + i] = p;
         }
-        debug_assert_eq!(placed, self.draws_out.len());
-        std::mem::swap(&mut self.runs, &mut self.runs_out);
-    }
-
-    /// Stably sorts `self.runs` by `key` into `self.runs_out`.
-    ///
-    /// Returns false if the input is not the shape this can handle: bands must
-    /// be non-decreasing (which `push` guarantees, since distances arrive
-    /// nearest first), the distinct page and key counts must stay small, and a
-    /// key must not repeat after a larger one.
-    #[allow(clippy::cast_possible_truncation)]
-    fn counting_sort_runs(&mut self) -> bool {
-        self.pages_seen.clear();
-        self.bands.clear();
-        let mut last_band = None;
-        for r in &self.runs {
-            let (band, p) = (r.key >> 32, r.key as u32);
-            match last_band {
-                Some(prev) if band < prev => return false,
-                Some(prev) if band == prev => {}
-                _ => {
-                    self.bands.push(band);
-                    last_band = Some(band);
-                }
-            }
-            if !self.pages_seen.contains(&p) {
-                self.pages_seen.push(p);
-                if self.pages_seen.len() > MAX_PAGES {
-                    return false;
-                }
-            }
-        }
-        let keys = self.bands.len() * self.pages_seen.len();
-        if keys == 0 || keys > MAX_KEYS {
-            return false;
-        }
-        self.pages_seen.sort_unstable();
-
-        // Each run's dense key: `band_index * pages + page_index`.
-        let np = self.pages_seen.len();
-        self.dest.clear();
-        self.dest.reserve(self.runs.len());
-        let mut band_index = 0usize;
-        let mut prev_band = u64::MAX;
-        for r in &self.runs {
-            let band = r.key >> 32;
-            if band != prev_band {
-                // `bands` is in first-seen order, which is ascending here.
-                band_index = match self.bands.binary_search(&band) {
-                    Ok(i) => i,
-                    Err(_) => return false,
-                };
-                prev_band = band;
-            }
-            let Some(page_index) = self.pages_seen.binary_search(&(r.key as u32)).ok() else {
-                return false;
-            };
-            self.dest.push((band_index * np + page_index) as u32);
-        }
-
-        // Stable counting sort: bucket starts, then placement in input order.
-        self.counts.clear();
-        self.counts.resize(keys, 0);
-        for &key in &self.dest {
-            self.counts[key as usize] += 1;
-        }
-        let mut acc = 0u32;
-        for count in &mut self.counts {
-            let n = *count;
-            *count = acc;
-            acc += n;
-        }
-        self.runs_out.clear();
-        self.runs_out.resize(self.runs.len(), Run::default());
-        for (i, &key) in self.dest.iter().enumerate() {
-            let slot = &mut self.counts[key as usize];
-            let at = *slot as usize;
-            *slot += 1;
-            self.runs_out[at] = self.runs[i];
-        }
-        true
-    }
 }
+    }

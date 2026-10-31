@@ -1,0 +1,30 @@
+diff --git a/crates/horizon-client-render/src/gfx/page_runs.rs b/crates/horizon-client-render/src/gfx/page_runs.rs
+index 3ada45737..d55981909 100644
+--- a/crates/horizon-client-render/src/gfx/page_runs.rs
++++ b/crates/horizon-client-render/src/gfx/page_runs.rs
+@@ -65,8 +65,24 @@ impl PageRuns {
+         if self.runs.windows(2).all(|w| page(&w[0]) == page(&w[1])) {
+             return &self.runs;
+         }
++        // Already in final order? `push` feeds runs nearest first, so key order
++        // is (band, page) and a list that is already key-sorted needs no
++        // reordering: the runs cover `draws[base..]` contiguously in order, so
++        // their starts are already the absolute indices below would rewrite
++        // them to. Strictly more general than the page check above at the same
++        // O(n), and the common case once sections cluster in a page.
++        if self.runs.windows(2).all(|w| w[0].key <= w[1].key) {
++            return &self.runs;
++        }
+         // Stable: within a band and page the runs stay nearest first.
+-        self.runs.sort_by_key(|r| r.key);
++        //
++        // `sort_by_key` is a stable merge sort and allocates an n/2 scratch
++        // buffer on every call -- four calls a frame. Stability is only needed
++        // among runs with equal keys, and within one call `start` is strictly
++        // increasing (`push` assigns the current draw count and skips empty
++        // runs), so `(key, start)` has no ties and an unstable sort gives
++        // exactly the same order without allocating anything.
++        self.runs.sort_unstable_by_key(|r| (r.key, r.start));
+         self.scratch.clear();
+         for r in &mut self.runs {
+             let (s, e) = (r.start as usize, (r.start + r.len) as usize);

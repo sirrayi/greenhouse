@@ -130,22 +130,19 @@ because insertion sort is used below ~20 elements and is stable regardless.
 
 | Item | State |
 | --- | --- |
-| Horizon beats vanilla + Sodium + Lithium | **Confirmed** from the project's published benchmark |
+| Horizon beats vanilla + Sodium + Lithium | **Confirmed** — the project's published benchmark |
 | The frame is CPU-bound | **Confirmed** for the median; unproven for the tail |
-| `horizon-mixins` runs on macOS | **Confirmed** (`plan` + `apply`, `status: ok`) |
-| OVERWRITE cannot rewrite closure-bearing bodies | **Confirmed** by probe |
-| `regroup_counting` / `sort_unstable` equivalent | **Proven** by `cargo test` |
-| Either of them shipped as a working hook | **Blocked** by the OVERWRITE limitation |
-| The patched game compiles and passes its tests | **Confirmed** — see below |
-| `patches/0001` applies to the pinned revision | **Confirmed** — `tools/apply-patches.sh --check` |
-| `patches/0001` passes Horizon's 576 tests | **Confirmed** — `576 passed; 0 failed` |
-| `patches/0002` is bit-identical to the reference walk | **Confirmed** — Horizon's exact-bits oracle test passes |
-| All three patches together pass all 576 tests | **Confirmed** — `576 passed; 0 failed` |
-| Each patch applies to a pristine checkout on its own | **Confirmed** — `--only <name>` for all three |
-| Each change is individually switchable | **Confirmed** — `--only` / `--except` |
+| `horizon-mixins` builds, plans and applies on macOS | **Confirmed** — `status: ok` |
+| OVERWRITE cannot rewrite a closure-bearing body | **Confirmed** by probe |
+| The patched game compiles and passes Horizon's tests | **Confirmed** — `576 passed; 0 failed` |
+| `patches/0002` applies to the pinned revision | **Confirmed** — `--check` |
+| `patches/0002` is bit-identical to the reference walk | **Confirmed** — Horizon's exact-bits oracle test |
 | `patches/0002` is 52% faster on Horizon's own walk benchmark | **Confirmed in a debug build**; optimized profile outstanding |
-| Any frame-rate measurement | **Not started** |
-| Any FPS measurement | **Not started** |
+| `patches/0003` applies, compiles and passes the suite | **Confirmed** |
+| Each patch applies to a pristine checkout on its own | **Confirmed** — `--only <name>` for each |
+| Each change is individually switchable | **Confirmed** — `--only` / `--except` |
+| A `regroup` sort replacement | **Measured 34-46% slower; removed** |
+| Any frame-rate or 1% low measurement | **Not started** |
 
 **Nothing here has been benchmarked.** Every measurement attempted was taken with the machine
 at load 23–27 on 8 cores; a microbenchmark swung between −55% and +148% on identical inputs
